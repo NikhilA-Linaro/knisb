@@ -88,10 +88,10 @@ typedef struct {
   /* Bitmap of kni interfaces with pending reads */
   uword * pending_read_bitmap;
 
-  /* Hash table to find turbotap interface given hw_if_index */
+  /* Hash table to find kni interface given hw_if_index */
   uword * kni_interface_index_by_sw_if_index;
 
-  /* Hash table to find turbotap interface given unix fd */
+  /* Hash table to find kni interface given ethernet */
   uword * kni_interface_index_by_eth_index;
 
   /* renumbering table */

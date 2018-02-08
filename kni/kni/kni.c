@@ -36,9 +36,10 @@
 #include <vnet/ip/ip.h>
 #include <vnet/plugin/plugin.h>
 #include <vnet/ethernet/ethernet.h>
-
-
 #include "kni.h"
+#include <rte_config.h>
+#include <rte_kni.h>
+
 
 kni_main_t kni_main;
 static void
@@ -451,22 +452,39 @@ vlib_plugin_register(vlib_main_t *m, vnet_plugin_handoff_t *h, int f)
 clib_error_t *turbotap_init(vlib_main_t *vm)
 {
   clib_error_t * error = 0;
+  u32 i =0;
+  struct rte_kni_conf conf;
   kni_main_t * km = &kni_main;
+  dpdk_main_t * dm = &dpdk_main;
+  kni_interface_t *ki = NULL;
 
   km->vlib_main = vm;
   km->vnet_main = vnet_get_main();
   km->unix_main = &unix_main;
   km->dpdk_main = &dpdk_main;
-  km->mtu_bytes = TAP_MTU_DEFAULT;
+  //km->mtu_bytes = TAP_MTU_DEFAULT;
   km->kni_interface_index_by_sw_if_index = hash_create (0, sizeof(uword));
   km->kni_interface_index_by_eth_index = hash_create (0, sizeof (uword));
-  km->rx_buffers = 0;
-  km->unused_buffer_list = 0;
-  vec_alloc(km->rx_buffers, VLIB_FRAME_SIZE);
-  vec_reset_length(km->rx_buffers);
-  vec_alloc(km->unused_buffer_list, VLIB_FRAME_SIZE);
-  vec_reset_length(km->unused_buffer_list);
-  vm->os_punt_frame = turbotap_nopunt_frame;
+  //km->rx_buffers = 0;
+  //km->unused_buffer_list = 0;
+  //vec_alloc(km->rx_buffers, VLIB_FRAME_SIZE);
+  //vec_reset_length(km->rx_buffers);
+  //vec_alloc(km->unused_buffer_list, VLIB_FRAME_SIZE);
+  //vec_reset_length(km->unused_buffer_list);
+  //vm->os_punt_frame = turbotap_nopunt_frame;
+  km->num_kni_interfaces = rte_eth_dev_count();
+  rte_kni_init(km->num_kni_interfaces);
+  for (i = 0; i< km->num_kni_interfaces; i++)
+	{
+		vec_add2 (km->kni_interfaces, ki, 1);
+		ki->hw_if_index =i;
+		memset(&conf, 0, sizeof(conf));
+		snprintf(conf.name, RTE_KNI_NAMESIZE, "vEth%u", i);
+		conf.group_id = i;
+		conf.mbuf_size = 2048;
+		ki->kni = rte_kni_alloc(dm->pktmbuf_pools[0], &conf, NULL);
+	
+	}
   return error;
 }
 VLIB_INIT_FUNCTION(turbotap_init);
