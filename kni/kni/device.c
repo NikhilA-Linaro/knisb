@@ -80,14 +80,14 @@ static_always_inline uword
 turbotap_tx_iface(vlib_main_t * vm,
                 vlib_node_runtime_t * node,
                 vlib_frame_t * frame,
-                kni_interface_t * ti)
+                kni_interface_t * ki)
 {
   u32 * buffers = vlib_frame_args (frame);
   uword n_packets = frame->n_vectors;
   vlib_buffer_t * b;
   int i = 0;
 
-  vnet_sw_interface_t *si = vnet_get_sw_interface (vnet_get_main(), ti->sw_if_index);
+  vnet_sw_interface_t *si = vnet_get_sw_interface (vnet_get_main(), ki->sw_if_index);
   if (PREDICT_FALSE(!(si->flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP))) {
     //Drop if interface is down
     vlib_buffer_free(vm, vlib_frame_vector_args(frame), frame->n_vectors);
@@ -100,7 +100,7 @@ turbotap_tx_iface(vlib_main_t * vm,
     struct iovec * iov;
     b = vlib_get_buffer(vm, buffers[i]);
 
-    if (ti->tx_msg[i].msg_hdr.msg_iov)
+    if (ki->tx_msg[i].msg_hdr.msg_iov)
       _vec_len(ti->tx_msg[i].msg_hdr.msg_iov) = 0; //Reset vector
 
     /* VLIB buffer chain -> Unix iovec(s). */
@@ -148,19 +148,16 @@ turbotap_tx_iface(vlib_main_t * vm,
 }
 
 /*
- * turbotap_tx
- * Output node, writes the buffers comprising the incoming frame 
- * to the tun/tap device, aka hands them to the Linux kernel stack.
- * 
+ * kni_tx
  */
 static uword
-turbotap_tx (vlib_main_t * vm,
+kni_tx (vlib_main_t * vm,
            vlib_node_runtime_t * node,
            vlib_frame_t * frame)
 {
   u32 * buffers = vlib_frame_args (frame);
-  kni_main_t * tr = &kni_main;
-  kni_interface_t * ti;
+  kni_main_t * km = &kni_main;
+  kni_interface_t * ki;
 
   if (!frame->n_vectors)
     return 0;
@@ -182,7 +179,7 @@ turbotap_tx (vlib_main_t * vm,
     clib_warning ("sw_if_index %d unknown", tx_sw_if_index);
     return 0;
   } else {
-    ti = vec_elt_at_index (tr->kni_interfaces, p[0]);
+    ki = vec_elt_at_index (tr->kni_interfaces, p[0]);
   }
 
   return turbotap_tx_iface(vm, node, frame, ti);
@@ -216,8 +213,8 @@ turbotap_interface_admin_up_down (vnet_main_t * vnm, u32 hw_if_index, u32 flags)
   return 0;
 }
 
-VNET_DEVICE_CLASS (turbotap_dev_class) = {
-  .name = "turbotap",
+VNET_DEVICE_CLASS (kni_dev_class) = {
+  .name = "kni",
   .tx_function = turbotap_tx,
   .format_device_name = format_turbotap_interface_name,
   .rx_redirect_to_node = turbotap_set_interface_next_node,

@@ -449,7 +449,7 @@ vlib_plugin_register(vlib_main_t *m, vnet_plugin_handoff_t *h, int f)
   return error;
 }
 #endif
-clib_error_t *turbotap_init(vlib_main_t *vm)
+clib_error_t *kni_init(vlib_main_t *vm)
 {
   clib_error_t * error = 0;
   u32 i =0;
@@ -477,14 +477,27 @@ clib_error_t *turbotap_init(vlib_main_t *vm)
   for (i = 0; i< km->num_kni_interfaces; i++)
 	{
 		vec_add2 (km->kni_interfaces, ki, 1);
-		ki->hw_if_index =i;
+		//ki->hw_if_index =i;
 		memset(&conf, 0, sizeof(conf));
 		snprintf(conf.name, RTE_KNI_NAMESIZE, "vEth%u", i);
 		conf.group_id = i;
 		conf.mbuf_size = 2048;
 		ki->kni = rte_kni_alloc(dm->pktmbuf_pools[0], &conf, NULL);
-	
+		error = ethernet_register_interface
+			(km->vnet_main,
+			 turbotap_dev_class.index,
+			 ki - km->kni_interfaces /* device instance */,
+			 /*Fixme MacAddr*/0 /* ethernet address */,
+			 &ki->hw_if_index, NULL);
+
+		if (error)
+		{
+			clib_error_report (error);
+			return VNET_API_ERROR_INVALID_REGISTRATION;
+		}
+
+
 	}
   return error;
 }
-VLIB_INIT_FUNCTION(turbotap_init);
+VLIB_INIT_FUNCTION(kni_init);
