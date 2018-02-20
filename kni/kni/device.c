@@ -37,9 +37,9 @@
 
 #include "kni.h"
 
-vnet_device_class_t turbotap_dev_class;
+vnet_device_class_t kni_dev_class;
 
-static u8 * format_turbotap_interface_name (u8 * s, va_list * args)
+static u8 * format_kni_interface_name (u8 * s, va_list * args)
 { 
   u32 i = va_arg (*args, u32);
   u32 show_dev_instance = ~0;
@@ -51,11 +51,11 @@ static u8 * format_turbotap_interface_name (u8 * s, va_list * args)
   if (show_dev_instance != ~0)
     i = show_dev_instance;
   
-  s = format (s, "turbotap-%d", i);
+  s = format (s, "kni-%d", i);
   return s;
 }
 
-static void turbotap_set_interface_next_node (vnet_main_t *vnm,
+static void kni_set_interface_next_node (vnet_main_t *vnm,
                                             u32 hw_if_index,
                                             u32 node_index)
 {
@@ -73,11 +73,11 @@ static void turbotap_set_interface_next_node (vnet_main_t *vnm,
     }
 
   ti->per_interface_next_index =
-    vlib_node_add_next (tr->vlib_main, turbotap_rx_node.index, node_index);
+    vlib_node_add_next (tr->vlib_main, kni_rx_node.index, node_index);
 }
 
 static_always_inline uword
-turbotap_tx_iface(vlib_main_t * vm,
+kni_tx_iface(vlib_main_t * vm,
                 vlib_node_runtime_t * node,
                 vlib_frame_t * frame,
                 kni_interface_t * ki)
@@ -85,6 +85,8 @@ turbotap_tx_iface(vlib_main_t * vm,
   u32 * buffers = vlib_frame_args (frame);
   uword n_packets = frame->n_vectors;
   vlib_buffer_t * b;
+  struct rte_mbuf *mb;
+
   int i = 0;
 
   vnet_sw_interface_t *si = vnet_get_sw_interface (vnet_get_main(), ki->sw_if_index);
@@ -100,49 +102,54 @@ turbotap_tx_iface(vlib_main_t * vm,
     struct iovec * iov;
     b = vlib_get_buffer(vm, buffers[i]);
 
+    dpdk_validate_rte_mbuf (vm, b, 0);
+    mb = rte_mbuf_from_vlib_buffer (b);
+    ki->tx_vector[i] = mb;
+/*
     if (ki->tx_msg[i].msg_hdr.msg_iov)
-      _vec_len(ti->tx_msg[i].msg_hdr.msg_iov) = 0; //Reset vector
+      _vec_len(ki->tx_msg[i].msg_hdr.msg_iov) = 0; //Reset vector
 
-    /* VLIB buffer chain -> Unix iovec(s). */
-    vec_add2 (ti->tx_msg[i].msg_hdr.msg_iov, iov, 1);
+    vec_add2 (ki->tx_msg[i].msg_hdr.msg_iov, iov, 1);
     iov->iov_base = b->data + b->current_data;
     iov->iov_len = b->current_length;
-    ti->tx_msg[i].msg_len = b->current_length;
+    ki->tx_msg[i].msg_len = b->current_length;
     if (PREDICT_FALSE (b->flags & VLIB_BUFFER_NEXT_PRESENT)) {
       do {
         b = vlib_get_buffer (vm, b->next_buffer);
-        vec_add2 (ti->tx_msg[i].msg_hdr.msg_iov, iov, 1);
+        vec_add2 (ki->tx_msg[i].msg_hdr.msg_iov, iov, 1);
         iov->iov_base = b->data + b->current_data;
         iov->iov_len = b->current_length;
-        ti->tx_msg[i].msg_len += b->current_length;
+        ki->tx_msg[i].msg_len += b->current_length;
       } while (b->flags & VLIB_BUFFER_NEXT_PRESENT);
     }
 
-    ti->tx_msg[i].msg_hdr.msg_name = NULL;
-    ti->tx_msg[i].msg_hdr.msg_namelen = 0;
-    ti->tx_msg[i].msg_hdr.msg_iovlen = _vec_len(ti->tx_msg[i].msg_hdr.msg_iov);
-    ti->tx_msg[i].msg_hdr.msg_control = NULL;
-    ti->tx_msg[i].msg_hdr.msg_controllen = 0;
-    ti->tx_msg[i].msg_hdr.msg_flags = MSG_DONTWAIT;
-    total_bytes += ti->tx_msg[i].msg_len;
+    ki->tx_msg[i].msg_hdr.msg_name = NULL;
+    ki->tx_msg[i].msg_hdr.msg_namelen = 0;
+    ki->tx_msg[i].msg_hdr.msg_iovlen = _vec_len(ki->tx_msg[i].msg_hdr.msg_iov);
+    ki->tx_msg[i].msg_hdr.msg_control = NULL;
+    ki->tx_msg[i].msg_hdr.msg_controllen = 0;
+    ki->tx_msg[i].msg_hdr.msg_flags = MSG_DONTWAIT;
+    total_bytes += ki->tx_msg[i].msg_len;
+*/
   }
-
+    rte_kni_tx_burst(ki->kni,ki->tx_vector,n_tx);
+/*
   if (n_tx) {
     int tx;
-    if ((tx = sendmmsg(ti->sock_fd, ti->tx_msg, n_tx, MSG_DONTWAIT)) < 1) {
+    if ((tx = sendmmsg(ki->sock_fd, ki->tx_msg, n_tx, MSG_DONTWAIT)) < 1) {
       vlib_increment_simple_counter
       (vnet_main.interface_main.sw_if_counters
        + VNET_INTERFACE_COUNTER_TX_ERROR, os_get_cpu_number(),
-       ti->sw_if_index, n_tx);
+       ki->sw_if_index, n_tx);
     } else {
       vlib_increment_combined_counter(
           vnet_main.interface_main.combined_sw_if_counters
           + VNET_INTERFACE_COUNTER_TX,
-          os_get_cpu_number(), ti->sw_if_index,
+          os_get_cpu_number(), ki->sw_if_index,
           tx, total_bytes);
     }
   }
-
+*/
   vlib_buffer_free(vm, vlib_frame_vector_args(frame), frame->n_vectors);
   return n_packets;
 }
@@ -170,24 +177,24 @@ kni_tx (vlib_main_t * vm,
   ASSERT(tx_sw_if_index != (u32)~0);
 
   /* Use the sup intfc to finesse vlan subifs */
-  vnet_hw_interface_t *hw = vnet_get_sup_hw_interface (tr->vnet_main, tx_sw_if_index);
+  vnet_hw_interface_t *hw = vnet_get_sup_hw_interface (km->vnet_main, tx_sw_if_index);
   tx_sw_if_index = hw->sw_if_index;
 
-  uword * p = hash_get (tr->kni_interface_index_by_sw_if_index,
+  uword * p = hash_get (km->kni_interface_index_by_sw_if_index,
                         tx_sw_if_index);
   if (p == 0) {
     clib_warning ("sw_if_index %d unknown", tx_sw_if_index);
     return 0;
   } else {
-    ki = vec_elt_at_index (tr->kni_interfaces, p[0]);
+    ki = vec_elt_at_index (km->kni_interfaces, p[0]);
   }
 
-  return turbotap_tx_iface(vm, node, frame, ti);
+  return kni_tx_iface(vm, node, frame, ki);
 }
 
-VLIB_REGISTER_NODE (turbotap_tx_node,static) = {
-  .function = turbotap_tx,
-  .name = "turbotap-tx",
+VLIB_REGISTER_NODE (kni_tx_node,static) = {
+  .function = kni_tx,
+  .name = "kni-tx",
   .type = VLIB_NODE_TYPE_INTERNAL,
   .vector_size = 4,
 };
@@ -197,7 +204,7 @@ VLIB_REGISTER_NODE (turbotap_tx_node,static) = {
  * otherwise, e.g. ip6 neighbor discovery breaks
  */
 static clib_error_t *
-turbotap_interface_admin_up_down (vnet_main_t * vnm, u32 hw_if_index, u32 flags)
+kni_interface_admin_up_down (vnet_main_t * vnm, u32 hw_if_index, u32 flags)
 {
   uword is_admin_up = (flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP) != 0;
   u32 hw_flags;
@@ -215,10 +222,10 @@ turbotap_interface_admin_up_down (vnet_main_t * vnm, u32 hw_if_index, u32 flags)
 
 VNET_DEVICE_CLASS (kni_dev_class) = {
   .name = "kni",
-  .tx_function = turbotap_tx,
-  .format_device_name = format_turbotap_interface_name,
-  .rx_redirect_to_node = turbotap_set_interface_next_node,
-  .admin_up_down_function = turbotap_interface_admin_up_down,
+  .tx_function = kni_tx,
+  .format_device_name = format_kni_interface_name,
+  .rx_redirect_to_node = kni_set_interface_next_node,
+  .admin_up_down_function = kni_interface_admin_up_down,
 //  .no_flatten_output_chains = 1,
 };
 

@@ -40,7 +40,7 @@
 #include "kni.h"
 
 static clib_error_t *
-turbotap_delete_command_fn (vlib_main_t * vm,
+kni_delete_command_fn (vlib_main_t * vm,
                  unformat_input_t * input,
                  vlib_cli_command_t * cmd)
 {
@@ -59,7 +59,7 @@ turbotap_delete_command_fn (vlib_main_t * vm,
     return clib_error_return (0, "unknown input `%U'",
                               format_unformat_error, input);
 
-  int rc = vnet_turbotap_delete (vm, sw_if_index);
+  int rc = vnet_kni_delete (vm, sw_if_index);
 
   if (!rc) {
     vlib_cli_output (vm, "Deleted.");
@@ -70,14 +70,14 @@ turbotap_delete_command_fn (vlib_main_t * vm,
   return 0;
 }
 
-VLIB_CLI_COMMAND (turbotap_delete_command, static) = {
-  .path = "turbotap delete",
-  .short_help = "turbotap delete <vpp-tap-intfc-name>",
-  .function = turbotap_delete_command_fn,
+VLIB_CLI_COMMAND (kni_delete_command, static) = {
+  .path = "kni delete",
+  .short_help = "kni delete <vpp-tap-intfc-name>",
+  .function = kni_delete_command_fn,
 };
 
 static clib_error_t *
-turbotap_connect_command_fn (vlib_main_t * vm,
+kni_connect_command_fn (vlib_main_t * vm,
                  unformat_input_t * input,
                  vlib_cli_command_t * cmd)
 {
@@ -102,11 +102,11 @@ turbotap_connect_command_fn (vlib_main_t * vm,
                &hwaddr))
     hwaddr_arg = hwaddr;
 
-  int rv = vnet_turbotap_connect(vm, intfc_name, hwaddr_arg, &sw_if_index);
+  int rv = vnet_kni_connect(vm, intfc_name, hwaddr_arg, &sw_if_index);
   if (rv) {
     switch (rv) {
     case VNET_API_ERROR_SYSCALL_ERROR_1:
-      vlib_cli_output (vm, "Couldn't open /dev/net/turbotap");
+      vlib_cli_output (vm, "Couldn't open /dev/net/kni");
       break;
 
     case VNET_API_ERROR_SYSCALL_ERROR_2:
@@ -154,16 +154,16 @@ turbotap_connect_command_fn (vlib_main_t * vm,
   return 0;
 }
 
-VLIB_CLI_COMMAND (turbotap_connect_command, static) = {
-    .path = "turbotap connect",
-    .short_help = "turbotap connect <intfc-name> [hwaddr <addr>]",
-    .function = turbotap_connect_command_fn,
+VLIB_CLI_COMMAND (kni_connect_command, static) = {
+    .path = "kni connect",
+    .short_help = "kni connect <intfc-name> [hwaddr <addr>]",
+    .function = kni_connect_command_fn,
 };
 
 clib_error_t *
-turbotap_cli_init (vlib_main_t * vm)
+kni_cli_init (vlib_main_t * vm)
 {
   return 0;
 }
 
-VLIB_INIT_FUNCTION (turbotap_cli_init);
+VLIB_INIT_FUNCTION (kni_cli_init);

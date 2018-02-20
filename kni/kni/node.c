@@ -39,26 +39,26 @@
 
 #include <kni/kni.h>
 
-vlib_node_registration_t turbotap_rx_node;
+vlib_node_registration_t kni_rx_node;
 
 enum {
-  TURBOTAP_RX_NEXT_IP4_INPUT,
-  TURBOTAP_RX_NEXT_IP6_INPUT,
-  TURBOTAP_RX_NEXT_ETHERNET_INPUT,
-  TURBOTAP_RX_NEXT_DROP,
-  TURBOTAP_RX_N_NEXT,
+  KNI_RX_NEXT_IP4_INPUT,
+  KNI_RX_NEXT_IP6_INPUT,
+  KNI_RX_NEXT_ETHERNET_INPUT,
+  KNI_RX_NEXT_DROP,
+  KNI_RX_N_NEXT,
 };
 
 typedef struct {
   u16 sw_if_index;
-} turbotap_rx_trace_t;
+} kni_rx_trace_t;
 
-u8 * format_turbotap_rx_trace (u8 * s, va_list * va)
+u8 * format_kni_rx_trace (u8 * s, va_list * va)
 {
   CLIB_UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
   CLIB_UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
   vnet_main_t * vnm = vnet_get_main();
-  turbotap_rx_trace_t * t = va_arg (*va, turbotap_rx_trace_t *);
+  kni_rx_trace_t * t = va_arg (*va, kni_rx_trace_t *);
   s = format (s, "%U", format_vnet_sw_if_index_name,
                 vnm, t->sw_if_index);
   return s;
@@ -92,230 +92,157 @@ buffer_add_to_chain(vlib_main_t *vm, u32 bi, u32 first_bi, u32 prev_bi)
   mbuf->next = 0;
 #endif
 }
-
-static uword
-turbotap_rx_iface(vlib_main_t * vm,
-           vlib_node_runtime_t * node,
-           kni_interface_t * ti)
+static inline u32
+kni_rx_burst(kni_interface_t * ki)
 {
-  kni_main_t * tr = &kni_main;
-  const uword buffer_size = vlib_buffer_free_list_buffer_size ( vm,
-                                  VLIB_BUFFER_DEFAULT_FREE_LIST_INDEX);
-  u32 n_trace = vlib_get_trace_count (vm, node);
-  u8 set_trace = 0;
-  vnet_main_t *vnm;
-  vnet_sw_interface_t * si;
-  u8 admin_down;
-  uword len = 0;
-  u32 next_index =  TURBOTAP_RX_NEXT_ETHERNET_INPUT;
-  u32 *to_next;
+  u32 n_buffers;
+  u32 n_left;
+  u32 n_this_chunk;
 
-  vnm = vnet_get_main();
-  si = vnet_get_sw_interface (vnm, ti->sw_if_index);
-  admin_down = !(si->flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP);
+  n_left = MAX_RECV;
+  n_buffers = 0;
 
-  if (ti->per_interface_next_index != ~0)
-     next_index = ti->per_interface_next_index;
-
-  /* Buffer Allocation */
-  u32 desired_allocation = ti->rx_ready * ti->mtu_buffers + 32;
-  if (PREDICT_TRUE(vec_len(tr->rx_buffers) < ti->rx_ready * ti->mtu_buffers))
-    {
-      len = vec_len(tr->rx_buffers);
-      vec_validate(tr->rx_buffers, desired_allocation - 1);
-      vec_validate(tr->unused_buffer_list, desired_allocation - 1);
-      _vec_len(tr->unused_buffer_list) = 0;
-      _vec_len(tr->rx_buffers) = len +
-          vlib_buffer_alloc(vm, &tr->rx_buffers[len], desired_allocation - len);
-      if (PREDICT_FALSE(vec_len(tr->rx_buffers) < ti->rx_ready * ti->mtu_buffers))
+      while (n_left)
         {
-          vlib_node_increment_counter(vm, turbotap_rx_node.index, TURBOTAP_ERROR_BUFFER_ALLOCATION, 1);
+          n_this_chunk = rte_kni_rx_burst(ki->kni, ki->rx_vector + n_buffers, n_left);
+          n_buffers += n_this_chunk;
+          n_left -= n_this_chunk;
+        //   rte_kni_handle_request(xd->kni);
+          /* Empirically, DPDK r1.8 produces vectors w/ 32 or fewer elts */
+          if (n_this_chunk < 32)
+            break;
         }
-    }
-
-  /* Filling msgs */
-  u32 i = 0;
-  len = vec_len(tr->rx_buffers);
-  while (i < ti->rx_ready && len > ti->mtu_buffers)
-    {
-      u32 j = 0;
-      vec_validate(ti->rx_msg[i].msg_hdr.msg_iov, ti->mtu_buffers - 1);
-      while (j < ti->mtu_buffers)
-        {
-          vlib_buffer_t *b = vlib_get_buffer(vm, tr->rx_buffers[len - 1]);
-          ti->rx_msg[i].msg_hdr.msg_iov[j].iov_base = b->data;
-          ti->rx_msg[i].msg_hdr.msg_iov[j].iov_len = buffer_size;
-          len--;
-          j++;
-        }
-
-      ti->rx_msg[i].msg_hdr.msg_iovlen = ti->mtu_buffers;
-      ti->rx_msg[i].msg_hdr.msg_flags = MSG_DONTWAIT;
-      ti->rx_msg[i].msg_hdr.msg_name = NULL;
-      ti->rx_msg[i].msg_hdr.msg_namelen = 0;
-      ti->rx_msg[i].msg_hdr.msg_control = NULL;
-      ti->rx_msg[i].msg_hdr.msg_controllen = 0;
-      ti->rx_msg[i].msg_len = 0;
-      i++;
-    }
-
-  /*
-   * Be careful here
-   *
-   * Experiments show that we need to set the time according
-   * to the number of msgs receive from kernel even if the call
-   * is NON-BLOCKING. If timeout is so small, then recvmmsg
-   * call gets as many packets as it can in that time period.
-   */
-  struct timespec timeout = {.tv_sec = 0, .tv_nsec = 500000};
-  int num_rx_msgs = recvmmsg(ti->sock_fd, ti->rx_msg, i, MSG_DONTWAIT, &timeout);
-  if (num_rx_msgs <= 0) {
-    if (errno != EAGAIN) {
-      vlib_node_increment_counter(vm, turbotap_rx_node.index,
-                                  TURBOTAP_ERROR_READ, 1);
-    }
-    return 0;
-  }
-
-  u32 next = next_index;
-  u32 n_left_to_next = 0;
-
-  i = 0;
-  len = vec_len(tr->rx_buffers);  
-  vlib_get_next_frame(vm, node, next_index, to_next, n_left_to_next);
-
-  while (i != num_rx_msgs && n_left_to_next)
-    {
-      vlib_buffer_t *b0, *first_b0;
-      u32 bi0 = 0, first_bi0 = 0, prev_bi0, j = 0;
-      u32 bytes_to_put = 0, bytes_already_put = 0;
-      u32 remain_len = ti->rx_msg[i].msg_len;
-
-      while (remain_len && len)
-        {        
-          /* grab free buffer */
-          prev_bi0 = bi0;
-          bi0 = tr->rx_buffers[len - 1];
-          b0 = vlib_get_buffer(vm, bi0);
-
-	  bytes_to_put = remain_len > buffer_size ? buffer_size : remain_len;
-          b0->current_length = bytes_to_put;
-
-          if (bytes_already_put == 0)
-            {
-#if DPDK > 0
-              struct rte_mbuf * mb = rte_mbuf_from_vlib_buffer(b0);
-              rte_pktmbuf_data_len (mb) = b0->current_length;
-              rte_pktmbuf_pkt_len (mb) = b0->current_length;
-#endif
-              b0->total_length_not_including_first_buffer = 0;
-              b0->flags = VLIB_BUFFER_TOTAL_LENGTH_VALID;
-              vnet_buffer(b0)->sw_if_index[VLIB_RX] = ti->sw_if_index;
-              vnet_buffer(b0)->sw_if_index[VLIB_TX] = (u32)~0;
-              first_bi0 = bi0;
-              first_b0 = vlib_get_buffer(vm, first_bi0);
-            }
-          else
-            buffer_add_to_chain(vm, bi0, first_bi0, prev_bi0);
-
-
-          bytes_already_put += bytes_to_put;
-          remain_len -= bytes_to_put;
-          j++;
-          len--;
-        }
-
-    /* record unused buffers */
-    while (j < ti->mtu_buffers)
-      {
-        u32 vec_len_unused = vec_len(tr->unused_buffer_list);
-        tr->unused_buffer_list[vec_len_unused] = tr->rx_buffers[len - 1];
-        len--;
-        j++;
-        _vec_len(tr->unused_buffer_list) = vec_len_unused + 1;
-      }
-
-    /* trace */
-    VLIB_BUFFER_TRACE_TRAJECTORY_INIT(first_b0);
-
-    first_b0->error = node->errors[TURBOTAP_ERROR_NONE];
-
-    /* Interface counters and tracing. */
-    if (PREDICT_TRUE(!admin_down))
-      {
-        vlib_increment_combined_counter (
-           vnet_main.interface_main.combined_sw_if_counters
-           + VNET_INTERFACE_COUNTER_RX,
-           os_get_cpu_number(), ti->sw_if_index,
-           1, ti->rx_msg[i].msg_len);
-
-        if (PREDICT_FALSE(n_trace > 0))
-          {
-            vlib_trace_buffer (vm, node, next_index,
-                             first_b0, /* follow_chain */ 1);
-            n_trace--;
-            set_trace = 1;
-            turbotap_rx_trace_t *t0 = vlib_add_trace (vm, node, first_b0, sizeof (*t0));
-            t0->sw_if_index = si->sw_if_index;
-          }
-      } else {
-        next = TURBOTAP_RX_NEXT_DROP;
-      }
-
-    /* next packet */
-    to_next[0] = first_bi0;
-    n_left_to_next -= 1;
-    to_next +=1;
-
-    /* enque and take next packet */
-    vlib_validate_buffer_enqueue_x1(vm, node, next_index , to_next,
-                            n_left_to_next, first_bi0, next);
-
-    i++;
-  }
-    
-  _vec_len(tr->rx_buffers) = len;
-  vlib_put_next_frame(vm, node, next_index, n_left_to_next);
-
-  /* put unused buffers back */
-  while (vec_len(tr->unused_buffer_list) > 0)
-    {
-      u32 vec_len_unused = vec_len(tr->unused_buffer_list);
-      u32 vec_len_rx = vec_len(tr->rx_buffers);
-      tr->rx_buffers[vec_len_rx] = tr->unused_buffer_list[vec_len_unused - 1];
-      _vec_len(tr->unused_buffer_list) -= 1;
-      _vec_len(tr->rx_buffers) += 1;
-    }
-
-  if (ti->rx_ready - i > 0 )
-    {
-      ti->rx_ready -= i;
-      if (ti->rx_ready < i)
-	ti->rx_ready = i;
-    }
-  else if (ti->rx_ready + i > MAX_RECV)
-        ti->rx_ready = MAX_RECV;
-  else
-        ti->rx_ready += i;
-
-  if (set_trace)
-    vlib_set_trace_count (vm, node, n_trace);
-  return i;
+  return n_buffers;
 }
 
 static uword
-turbotap_rx (vlib_main_t * vm,
+kni_rx_iface(vlib_main_t * vm,
+           vlib_node_runtime_t * node,
+           kni_interface_t * ki)
+{
+	kni_main_t * km = &kni_main;
+	u32 n_buffers;
+	unsigned num;
+	u32 mb_index;
+	uword n_rx_bytes = 0;
+
+	//  const uword buffer_size = vlib_buffer_free_list_buffer_size ( vm,
+	//                                VLIB_BUFFER_DEFAULT_FREE_LIST_INDEX);
+	/*  u32 n_trace = vlib_get_trace_count (vm, node);
+	    u8 set_trace = 0;
+	    */
+	vnet_main_t *vnm;
+	vnet_sw_interface_t * si;
+	u8 admin_down;
+	uword len = 0;
+	u32 next_index =  KNI_RX_NEXT_ETHERNET_INPUT;
+	u32 n_left_to_next, *to_next;
+	vlib_buffer_free_list_t *fl;
+
+	vnm = vnet_get_main();
+
+	n_buffers = kni_rx_burst(ki);
+
+	if (n_buffers == 0)
+	{
+		return 0;
+	}
+
+	fl = vlib_buffer_get_free_list (vm, VLIB_BUFFER_DEFAULT_FREE_LIST_INDEX);
+
+	/* Update buffer template */
+	//vnet_buffer (bt)->sw_if_index[VLIB_RX] = ki->sw_if_index;
+
+	while (n_buffers > 0 )
+	{
+		vlib_buffer_t *b0;
+		u32 bi0, next0;
+		u8 error0;
+		i16 offset0;
+
+		vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
+		while (n_buffers > 0 && n_left_to_next > 0)
+		{
+			struct rte_mbuf *mb0 = ki->rx_vector[mb_index];
+
+			ASSERT (mb0);
+
+			b0 = vlib_buffer_from_rte_mbuf (mb0);
+
+			vnet_buffer (b0)->sw_if_index[VLIB_RX] = ki->sw_if_index;
+			//b0->buffer_pool_index =;/*TODO*/
+			/* Prefetch one next segment if it exists. */
+
+			bi0 = vlib_get_buffer_index (vm, b0);
+
+			to_next[0] = bi0;
+			to_next++;
+			n_left_to_next--;
+			/*TODO*/
+			//    next0 = dpdk_rx_next_from_etype (mb0);
+
+			//          dpdk_rx_error_from_mb (mb0, &next0, &error0);
+			//         b0->error = node->errors[error0];
+
+			//          offset0 = device_input_next_node_advance[next0];
+			offset0 = 0;
+			b0->current_data = mb0->data_off + offset0 - RTE_PKTMBUF_HEADROOM;
+			b0->flags |= 0; //device_input_next_node_flags[next0];
+			vnet_buffer (b0)->l3_hdr_offset = b0->current_data;
+			vnet_buffer (b0)->l2_hdr_offset =
+				mb0->data_off - RTE_PKTMBUF_HEADROOM;
+			b0->current_length = mb0->data_len - offset0;
+			n_rx_bytes += mb0->pkt_len;
+
+			/* Process subsequent segments of multi-segment packets */
+			//  dpdk_process_subseq_segs (vm, b0, mb0, fl);
+
+			/*
+			 *            * Turn this on if you run into
+			 *                       * "bad monkey" contexts, and you want to know exactly
+			 *                                  * which nodes they've visited... See main.c...
+			 *                                             */
+			//VLIB_BUFFER_TRACE_TRAJECTORY_INIT (b0);
+
+			/* Do we have any driver RX features configured on the interface? */
+			//   vnet_feature_start_device_input_x1 (xd->vlib_sw_if_index, &next0,
+			//                                     b0);
+
+			vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+					to_next, n_left_to_next,
+					bi0, next0);
+			n_buffers--;
+			mb_index++;
+		}
+		vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+	}
+
+	return mb_index;
+
+}
+
+static uword
+kni_rx (vlib_main_t * vm,
            vlib_node_runtime_t * node,
            vlib_frame_t * frame)
 {
-  kni_main_t * tr = &kni_main;
-  static u32 * ready_interface_indices;
-  kni_interface_t * ti;
+  kni_main_t * km = &kni_main;
+  kni_interface_t * ki;
   int i;
   u32 total_count = 0;
 
+  for (i = 0; i < vec_len(km->kni_interfaces); i++)
+    {
+
+      ki = vec_elt_at_index (km->kni_interfaces, i);
+      total_count += kni_rx_iface(vm, node, ki);
+    }
+  return total_count; //This might return more than 256.
+
+/*  static u32 * ready_interface_indices;
+
   vec_reset_length (ready_interface_indices);
-  clib_bitmap_foreach (i, tr->pending_read_bitmap,
+  clib_bitmap_foreach (i, km->pending_read_bitmap,
   ({
     vec_add1 (ready_interface_indices, i);
   }));
@@ -325,38 +252,39 @@ turbotap_rx (vlib_main_t * vm,
 
   for (i = 0; i < vec_len(ready_interface_indices); i++)
     {
-      tr->pending_read_bitmap =
-        clib_bitmap_set (tr->pending_read_bitmap,
+      km->pending_read_bitmap =
+        clib_bitmap_set (km->pending_read_bitmap,
                          ready_interface_indices[i], 0);
 
-      ti = vec_elt_at_index (tr->kni_interfaces, ready_interface_indices[i]);
-      total_count += turbotap_rx_iface(vm, node, ti);
+      ki = vec_elt_at_index (km->kni_interfaces, ready_interface_indices[i]);
+      total_count += kni_rx_iface(vm, node, ki);
     }
   return total_count; //This might return more than 256.
+*/
 }
 
-static char * turbotap_rx_error_strings[] = {
+static char * kni_rx_error_strings[] = {
 #define _(sym,string) string,
-  foreach_turbotap_error
+  foreach_kni_error
 #undef _
 };
 
-VLIB_REGISTER_NODE (turbotap_rx_node) = {
-  .function = turbotap_rx,
-  .name = "turbotap-rx",
+VLIB_REGISTER_NODE (kni_rx_node) = {
+  .function = kni_rx,
+  .name = "kni-rx",
   .type = VLIB_NODE_TYPE_INPUT,
-  .state = VLIB_NODE_STATE_INTERRUPT,
+  .state = VLIB_NODE_STATE_POLLING,
   .vector_size = 4,
-  .n_errors = TURBOTAP_N_ERROR,
-  .error_strings = turbotap_rx_error_strings,
-  .format_trace = format_turbotap_rx_trace,
+  .n_errors = KNI_N_ERROR,
+  .error_strings = kni_rx_error_strings,
+  .format_trace = format_kni_rx_trace,
 
-  .n_next_nodes = TURBOTAP_RX_N_NEXT,
+  .n_next_nodes = KNI_RX_N_NEXT,
   .next_nodes = {
-    [TURBOTAP_RX_NEXT_IP4_INPUT] = "ip4-input-no-checksum",
-    [TURBOTAP_RX_NEXT_IP6_INPUT] = "ip6-input",
-    [TURBOTAP_RX_NEXT_DROP] = "error-drop",
-    [TURBOTAP_RX_NEXT_ETHERNET_INPUT] = "ethernet-input",
+    [KNI_RX_NEXT_IP4_INPUT] = "ip4-input-no-checksum",
+    [KNI_RX_NEXT_IP6_INPUT] = "ip6-input",
+    [KNI_RX_NEXT_DROP] = "error-drop",
+    [KNI_RX_NEXT_ETHERNET_INPUT] = "ethernet-input",
   },
 };
 

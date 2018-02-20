@@ -449,55 +449,101 @@ vlib_plugin_register(vlib_main_t *m, vnet_plugin_handoff_t *h, int f)
   return error;
 }
 #endif
-clib_error_t *kni_init(vlib_main_t *vm)
-{
-  clib_error_t * error = 0;
-  u32 i =0;
-  struct rte_kni_conf conf;
-  kni_main_t * km = &kni_main;
-  dpdk_main_t * dm = &dpdk_main;
-  kni_interface_t *ki = NULL;
 
-  km->vlib_main = vm;
-  km->vnet_main = vnet_get_main();
-  km->unix_main = &unix_main;
-  km->dpdk_main = &dpdk_main;
-  //km->mtu_bytes = TAP_MTU_DEFAULT;
-  km->kni_interface_index_by_sw_if_index = hash_create (0, sizeof(uword));
-  km->kni_interface_index_by_eth_index = hash_create (0, sizeof (uword));
-  //km->rx_buffers = 0;
-  //km->unused_buffer_list = 0;
-  //vec_alloc(km->rx_buffers, VLIB_FRAME_SIZE);
-  //vec_reset_length(km->rx_buffers);
-  //vec_alloc(km->unused_buffer_list, VLIB_FRAME_SIZE);
-  //vec_reset_length(km->unused_buffer_list);
-  //vm->os_punt_frame = turbotap_nopunt_frame;
-  km->num_kni_interfaces = rte_eth_dev_count();
-  rte_kni_init(km->num_kni_interfaces);
-  for (i = 0; i< km->num_kni_interfaces; i++)
+
+static uword
+kni_process(vlib_main_t * vm, vlib_node_runtime_t * rt, vlib_frame_t * f)
+{
+	clib_error_t * error = 0;
+	u32 i =0;
+	struct rte_kni_conf conf;
+	kni_main_t * km = &kni_main;
+	dpdk_main_t * dm = &dpdk_main;
+	kni_interface_t *ki = NULL;
+	//  struct rte_kni_ops ops;
+	//  struct rte_eth_dev_info dev_info;
+
+
+	km->vlib_main = vm;
+	km->vnet_main = vnet_get_main();
+	km->unix_main = &unix_main;
+	km->dpdk_main = &dpdk_main;
+	km->kni_interface_index_by_sw_if_index = hash_create (0, sizeof(uword));
+	km->kni_interface_index_by_eth_index = hash_create (0, sizeof (uword));
+	km->num_kni_interfaces=0;
+	vnet_hw_interface_t *hi;
+	pool_foreach (hi, dm->vnet_main->interface_main.hw_interfaces, ({
+
+				vec_add2 (km->kni_interfaces, ki, 1);
+				clib_warning ("hw_if_index %d sw_if_index %d",hi->hw_if_index,
+					hi->sw_if_index);
+				hash_set(km->kni_interface_index_by_sw_if_index,hi->sw_if_index,km->kni_interfaces);
+				km->num_kni_interfaces++;
+
+				}));
+
+	rte_kni_init(km->num_kni_interfaces);
+	for (i = 0; i< km->num_kni_interfaces; i++)
 	{
-		vec_add2 (km->kni_interfaces, ki, 1);
 		//ki->hw_if_index =i;
+		ki = vec_elt_at_index(km->kni_interfaces, i);
 		memset(&conf, 0, sizeof(conf));
 		snprintf(conf.name, RTE_KNI_NAMESIZE, "vEth%u", i);
 		conf.group_id = i;
 		conf.mbuf_size = 2048;
-		ki->kni = rte_kni_alloc(dm->pktmbuf_pools[0], &conf, NULL);
-		error = ethernet_register_interface
-			(km->vnet_main,
-			 turbotap_dev_class.index,
-			 ki - km->kni_interfaces /* device instance */,
-			 /*Fixme MacAddr*/0 /* ethernet address */,
-			 &ki->hw_if_index, NULL);
-
-		if (error)
-		{
-			clib_error_report (error);
-			return VNET_API_ERROR_INVALID_REGISTRATION;
-		}
+		ki->kni = rte_kni_alloc(dm->pktmbuf_pools[0], &conf,  NULL);
 
 
 	}
-  return error;
+	return error;
+
+}
+
+
+/* *INDENT-OFF* */
+VLIB_REGISTER_NODE (kni_process_node,static) = {
+    .function = kni_process,
+    .type = VLIB_NODE_TYPE_PROCESS,
+    .name = "kni-process",
+    .process_log2_n_stack_bytes = 17,
+};
+/* *INDENT-ON* */
+
+
+
+
+clib_error_t *kni_init(vlib_main_t *vm)
+{
+	clib_error_t * error = 0;
+
+	return error;
 }
 VLIB_INIT_FUNCTION(kni_init);
+/* *INDENT-OFF* */
+VLIB_PLUGIN_REGISTER () = {
+    .version = "KNI.1.0",
+    .description = "KNI SLOWPATH (KNI)",
+};
+/* *INDENT-ON* */
+
+
+/*	  ops.port_id = port_id;
+	  memset(&ops, 0, sizeof(ops));
+	  ops.change_mtu = kni_change_mtu;
+	  clib_warning ("Registering kni_config_network_interface");
+	  ops.config_network_if = kni_config_network_interface;
+	  ki->kni = rte_kni_alloc(dm->pktmbuf_pools[0], &conf,  &ops);
+*/
+	  /*		error = ethernet_register_interface
+			(km->vnet_main,
+			km->kni_interfaces,
+			ki - km->kni_interfaces /|* device instance *|/,
+			/|*Fixme MacAddr*|/0 /|* ethernet address *|/,
+			&ki->hw_if_index, NULL);
+
+			if (error)
+			{
+			clib_error_report (error);
+			return error;
+			}
+			*/

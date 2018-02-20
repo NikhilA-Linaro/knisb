@@ -19,8 +19,8 @@
 #include <vlib/vlib.h>
 #include <dpdk/device/dpdk.h>
 
-#ifndef __TURBOTAP_H__
-#define __TURBOTAP_H__
+#ifndef __KNI_H__
+#define __KNI_H__
 
 #define TUNGETSOCKFD _IOR('T', 224, int)
 #define MAX_SEND 256
@@ -30,7 +30,7 @@
 #define TAP_MTU_MAX 65535
 #define TAP_MTU_MIN 68
 
-#define foreach_turbotap_error                            \
+#define foreach_kni_error                            \
   /* Must be first. */                                  \
  _(NONE, "no error")                                    \
  _(READ, "read error")                                  \
@@ -38,16 +38,13 @@
  _(UNKNOWN, "unknown error")
 
 typedef enum {
-#define _(sym,str) TURBOTAP_ERROR_##sym,
-  foreach_turbotap_error
+#define _(sym,str) KNI_ERROR_##sym,
+  foreach_kni_error
 #undef _
-   TURBOTAP_N_ERROR,
- } turbotap_error_t;
+   KNI_N_ERROR,
+ } kni_error_t;
 
 typedef struct {
-  u32 unix_fd;
-  u32 unix_file_index;
-  u32 provision_fd;
   u32 sw_if_index;              /* for counters */
   u32 hw_if_index;
   u32 eth_sw_if_index;              /* for counters */
@@ -61,12 +58,12 @@ typedef struct {
   u32 mtu_bytes;
   u32 mtu_buffers;
 
-  /* turbotap */
-  int turbotap_fd;
+  /* kni */
+  int kni_fd;
   int sock_fd;
   int rx_ready;
-  struct mmsghdr rx_msg[MAX_RECV];
-  struct mmsghdr tx_msg[MAX_SEND];
+  struct rte_mbuf *rx_vector[MAX_RECV];
+  struct rte_mbuf *tx_vector[MAX_SEND];
 } kni_interface_t;
 
 typedef struct {
@@ -76,7 +73,7 @@ typedef struct {
   /* record and put back unused rx buffers */
   u32 * unused_buffer_list;
 
-  /*  Default MTU for newly created turbotap interface. */
+  /*  Default MTU for newly created kni interface. */
   u32 mtu_bytes;
 
   /* Number of kni interfaces */
@@ -107,12 +104,12 @@ typedef struct {
   dpdk_main_t * dpdk_main;
 } kni_main_t;
 
-extern vnet_device_class_t turbotap_dev_class;
-extern vlib_node_registration_t turbotap_rx_node;
+extern vnet_device_class_t kni_dev_class;
+extern vlib_node_registration_t kni_rx_node;
 extern kni_main_t kni_main;
 
-int vnet_turbotap_connect(vlib_main_t * vm, u8 * intfc_name, u8 *hwaddr_arg,
+int vnet_kni_connect(vlib_main_t * vm, u8 * intfc_name, u8 *hwaddr_arg,
 						u32 * sw_if_indexp);
-int vnet_turbotap_delete(vlib_main_t *vm, u32 sw_if_index);
+int vnet_kni_delete(vlib_main_t *vm, u32 sw_if_index);
 
 #endif
