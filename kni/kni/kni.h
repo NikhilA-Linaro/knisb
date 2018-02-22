@@ -19,18 +19,11 @@
 #include <vlib/vlib.h>
 #include <dpdk/device/dpdk.h>
 
-#define kni_vlib_buffer_from_rte_mbuf(x) ((vlib_buffer_t *)(x+1))
-
 #ifndef __KNI_H__
 #define __KNI_H__
 
-#define TUNGETSOCKFD _IOR('T', 224, int)
 #define MAX_SEND 256
 #define MAX_RECV 256
-
-#define TAP_MTU_DEFAULT 1500
-#define TAP_MTU_MAX 65535
-#define TAP_MTU_MIN 68
 
 #define foreach_kni_error                            \
   /* Must be first. */                                  \
@@ -38,6 +31,8 @@
  _(READ, "read error")                                  \
  _(BUFFER_ALLOCATION, "buffer allocation error")	\
  _(UNKNOWN, "unknown error")
+
+#define kni_vlib_buffer_from_rte_mbuf(x) ((vlib_buffer_t *)(x+1))
 
 typedef enum {
 #define _(sym,str) KNI_ERROR_##sym,
@@ -102,16 +97,11 @@ typedef struct {
   /* convenience */
   vlib_main_t * vlib_main;
   vnet_main_t * vnet_main;
-  unix_main_t * unix_main;
   dpdk_main_t * dpdk_main;
 } kni_main_t;
 
 extern vnet_device_class_t kni_dev_class;
-extern vlib_node_registration_t kni_rx_node;
+extern vlib_node_registration_t kni_input_node;
 extern kni_main_t kni_main;
-
-int vnet_kni_connect(vlib_main_t * vm, u8 * intfc_name, u8 *hwaddr_arg,
-						u32 * sw_if_indexp);
-int vnet_kni_delete(vlib_main_t *vm, u32 sw_if_index);
 
 #endif

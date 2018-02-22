@@ -39,7 +39,7 @@
 
 #include <kni/kni.h>
 
-vlib_node_registration_t kni_rx_node;
+vlib_node_registration_t kni_input_node;
 
 enum {
   KNI_RX_NEXT_INTERFACE_OUTPUT,
@@ -48,14 +48,14 @@ enum {
 
 typedef struct {
   u16 sw_if_index;
-} kni_rx_trace_t;
+} kni_input_trace_t;
 
-u8 * format_kni_rx_trace (u8 * s, va_list * va)
+u8 * format_kni_input_trace (u8 * s, va_list * va)
 {
   CLIB_UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
   CLIB_UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
   vnet_main_t * vnm = vnet_get_main();
-  kni_rx_trace_t * t = va_arg (*va, kni_rx_trace_t *);
+  kni_input_trace_t * t = va_arg (*va, kni_input_trace_t *);
   s = format (s, "%U", format_vnet_sw_if_index_name,
                 vnm, t->sw_if_index);
   return s;
@@ -90,7 +90,7 @@ buffer_add_to_chain(vlib_main_t *vm, u32 bi, u32 first_bi, u32 prev_bi)
 #endif
 }
 static inline u32
-kni_rx_burst(kni_interface_t * ki)
+kni_input_burst(kni_interface_t * ki)
 {
   u32 n_buffers;
   u32 n_left;
@@ -113,7 +113,7 @@ kni_rx_burst(kni_interface_t * ki)
 }
 
 static uword
-kni_rx_iface(vlib_main_t * vm,
+kni_input_iface(vlib_main_t * vm,
            vlib_node_runtime_t * node,
            kni_interface_t * ki)
 {
@@ -136,10 +136,10 @@ kni_rx_iface(vlib_main_t * vm,
 	u32 next_index =  KNI_RX_NEXT_INTERFACE_OUTPUT;
 	u32 n_left_to_next, *to_next;
 	vlib_buffer_free_list_t *fl;
-	 //clib_warning ("Entering kni_rx_iface");
+	 //clib_warning ("Entering kni_input_iface");
 	vnm = vnet_get_main();
 
-	n_buffers = kni_rx_burst(ki);
+	n_buffers = kni_input_burst(ki);
 
 	if (n_buffers == 0)
 	{
@@ -206,7 +206,7 @@ kni_rx_iface(vlib_main_t * vm,
 }
 
 static uword
-kni_rx (vlib_main_t * vm,
+kni_input (vlib_main_t * vm,
            vlib_node_runtime_t * node,
            vlib_frame_t * frame)
 {
@@ -219,7 +219,7 @@ kni_rx (vlib_main_t * vm,
     {
 
       ki = vec_elt_at_index (km->kni_interfaces, i);
-      total_count += kni_rx_iface(vm, node, ki);
+      total_count += kni_input_iface(vm, node, ki);
     }
   return total_count; //This might return more than 256.
 
@@ -241,27 +241,27 @@ kni_rx (vlib_main_t * vm,
                          ready_interface_indices[i], 0);
 
       ki = vec_elt_at_index (km->kni_interfaces, ready_interface_indices[i]);
-      total_count += kni_rx_iface(vm, node, ki);
+      total_count += kni_input_iface(vm, node, ki);
     }
   return total_count; //This might return more than 256.
 */
 }
 
-static char * kni_rx_error_strings[] = {
+static char * kni_input_error_strings[] = {
 #define _(sym,string) string,
   foreach_kni_error
 #undef _
 };
 
-VLIB_REGISTER_NODE (kni_rx_node) = {
-  .function = kni_rx,
+VLIB_REGISTER_NODE (kni_input_node) = {
+  .function = kni_input,
   .name = "kni-rx",
   .type = VLIB_NODE_TYPE_INPUT,
   .state = VLIB_NODE_STATE_POLLING,
   .vector_size = 4,
   .n_errors = KNI_N_ERROR,
-  .error_strings = kni_rx_error_strings,
-  .format_trace = format_kni_rx_trace,
+  .error_strings = kni_input_error_strings,
+  .format_trace = format_kni_input_trace,
 
   .n_next_nodes = KNI_RX_N_NEXT,
   .next_nodes = {

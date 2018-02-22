@@ -1,6 +1,5 @@
 /*
  *------------------------------------------------------------------
- * Copyright (c) 2016 Cisco and/or its affiliates.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at:
@@ -43,10 +42,10 @@ static u8 * format_kni_interface_name (u8 * s, va_list * args)
 { 
   u32 i = va_arg (*args, u32);
   u32 show_dev_instance = ~0;
-  kni_main_t * tr = &kni_main;
+  kni_main_t * km = &kni_main;
   
-  if (i < vec_len (tr->show_dev_instance_by_real_dev_instance))
-    show_dev_instance = tr->show_dev_instance_by_real_dev_instance[i];
+  if (i < vec_len (km->show_dev_instance_by_real_dev_instance))
+    show_dev_instance = km->show_dev_instance_by_real_dev_instance[i];
   
   if (show_dev_instance != ~0)
     i = show_dev_instance;
@@ -59,21 +58,21 @@ static void kni_set_interface_next_node (vnet_main_t *vnm,
                                             u32 hw_if_index,
                                             u32 node_index)
 {
-  kni_main_t *tr = &kni_main;
-  kni_interface_t *ti;
+  kni_main_t *km = &kni_main;
+  kni_interface_t *ki;
   vnet_hw_interface_t *hw = vnet_get_hw_interface (vnm, hw_if_index);
 
-  ti = vec_elt_at_index (tr->kni_interfaces, hw->dev_instance);
+  ki = vec_elt_at_index (km->kni_interfaces, hw->dev_instance);
 
   /* Shut off redirection */
   if (node_index == ~0)
     {
-      ti->per_interface_next_index = node_index;
+      ki->per_interface_next_index = node_index;
       return;
     }
 
-  ti->per_interface_next_index =
-    vlib_node_add_next (tr->vlib_main, kni_rx_node.index, node_index);
+  ki->per_interface_next_index =
+    vlib_node_add_next (km->vlib_main, kni_input_node.index, node_index);
 }
 
 static_always_inline uword
@@ -213,13 +212,6 @@ kni_interface_add_del_function(vnet_main_t * vnm, u32 hw_if_index, u32 flags)
 	return 0;
 
 }
-static clib_error_t *
-kni_link_up_down_function(vnet_main_t * vnm, u32 hw_if_index, u32 flags){
-
-	clib_warning ("Calling kni_link_up_down_function hw_if_index[%d] ",hw_if_index);
-
-	return 0;
-}
 /* 
  * Mainly exists to set link_state == admin_state
  * otherwise, e.g. ip6 neighbor discovery breaks
@@ -227,7 +219,7 @@ kni_link_up_down_function(vnet_main_t * vnm, u32 hw_if_index, u32 flags){
 static clib_error_t *
 kni_interface_admin_up_down (vnet_main_t * vnm, u32 hw_if_index, u32 flags)
 {
-  clib_warning ("Calling kni_link_up_down_function hw_if_index[%d] ",hw_if_index);
+  clib_warning ("Calling kni_admin_up_down_function hw_if_index[%d] ",hw_if_index);
   uword is_admin_up = (flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP) != 0;
   u32 hw_flags;
   u32 speed_duplex = VNET_HW_INTERFACE_FLAG_FULL_DUPLEX
@@ -249,7 +241,5 @@ VNET_DEVICE_CLASS (kni_dev_class) = {
   .rx_redirect_to_node = kni_set_interface_next_node,
   .admin_up_down_function = kni_interface_admin_up_down,
   .interface_add_del_function= kni_interface_add_del_function,
- // .link_up_down_function= kni_link_up_down_function,
-//  .no_flatten_output_chains = 1,
 };
 

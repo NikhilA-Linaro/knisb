@@ -1,6 +1,5 @@
 /*
  *------------------------------------------------------------------
- * Copyright (c) 2016 Cisco and/or its affiliates.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at:
@@ -15,6 +14,7 @@
  *------------------------------------------------------------------
  */
 #define _GNU_SOURCE
+#if 0
 #include <fcntl.h>              /* for open */
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -26,7 +26,7 @@
 #include <linux/socket.h>
 #include <linux/if_arp.h>
 #include <linux/if_tun.h>
-
+#endif
 #include <vlib/vlib.h>
 #include <vnet/vnet.h>
 
@@ -63,129 +63,6 @@ static struct rte_eth_conf port_conf = {
 static int kni_change_mtu(uint16_t port_id, unsigned int new_mtu);
 static int kni_config_network_interface(uint16_t port_id, uint8_t if_up);
 
-/*
-
-static clib_error_t *
-kni_delete_command_fn (vlib_main_t * vm,
-                 unformat_input_t * input,
-                 vlib_cli_command_t * cmd)
-{
-  kni_main_t * tr = &kni_main;
-  u32 sw_if_index = ~0;
-
-  if (tr->is_disabled)
-    {
-      return clib_error_return (0, "device disabled...");
-    }
-
-  if (unformat (input, "%U", unformat_vnet_sw_interface, tr->vnet_main,
-                &sw_if_index))
-      ;
-  else
-    return clib_error_return (0, "unknown input `%U'",
-                              format_unformat_error, input);
-
-  int rc = vnet_kni_delete (vm, sw_if_index);
-
-  if (!rc) {
-    vlib_cli_output (vm, "Deleted.");
-  } else {
-    vlib_cli_output (vm, "Error during deletion of tap interface. (rc: %d)", rc);
-  }
-
-  return 0;
-}
-
-VLIB_CLI_COMMAND (kni_delete_command, static) = {
-  .path = "kni delete",
-  .short_help = "kni delete <vpp-tap-intfc-name>",
-  .function = kni_delete_command_fn,
-};
-
-static clib_error_t *
-kni_connect_command_fn (vlib_main_t * vm,
-                 unformat_input_t * input,
-                 vlib_cli_command_t * cmd)
-{
-  u8 * intfc_name;
-  kni_main_t * tr = &kni_main;
-  u8 hwaddr[6];
-  u8 *hwaddr_arg = 0;
-  u32 sw_if_index;
-
-  if (tr->is_disabled)
-    {
-      return clib_error_return (0, "device disabled...");
-    }
-
-  if (unformat (input, "%s", &intfc_name))
-    ;
-  else
-    return clib_error_return (0, "unknown input `%U'",
-                              format_unformat_error, input);
-
-  if (unformat(input, "hwaddr %U", unformat_ethernet_address,
-               &hwaddr))
-    hwaddr_arg = hwaddr;
-
-  int rv = vnet_kni_connect(vm, intfc_name, hwaddr_arg, &sw_if_index);
-  if (rv) {
-    switch (rv) {
-    case VNET_API_ERROR_SYSCALL_ERROR_1:
-      vlib_cli_output (vm, "Couldn't open /dev/net/kni");
-      break;
-
-    case VNET_API_ERROR_SYSCALL_ERROR_2:
-      vlib_cli_output (vm, "Error setting flags on '%s'", intfc_name);
-      break;
-
-    case VNET_API_ERROR_SYSCALL_ERROR_3:
-      vlib_cli_output (vm, "Couldn't open provisioning socket");
-      break;
-
-    case VNET_API_ERROR_SYSCALL_ERROR_4:
-      vlib_cli_output (vm, "Couldn't get if_index");
-      break;
-
-    case VNET_API_ERROR_SYSCALL_ERROR_5:
-      vlib_cli_output (vm, "Couldn't bind provisioning socket");
-      break;
-
-    case VNET_API_ERROR_SYSCALL_ERROR_6:
-      vlib_cli_output (0, "Couldn't set device non-blocking flag");
-      break;
-
-    case VNET_API_ERROR_SYSCALL_ERROR_7:
-      vlib_cli_output (0, "Couldn't set device MTU");
-      break;
-
-    case VNET_API_ERROR_SYSCALL_ERROR_8:
-      vlib_cli_output (0, "Couldn't get interface flags");
-      break;
-    case VNET_API_ERROR_SYSCALL_ERROR_9:
-      vlib_cli_output (0, "Couldn't set intfc admin state up");
-      break;
-
-    case VNET_API_ERROR_INVALID_REGISTRATION:
-      vlib_cli_output (0, "Invalid registration");
-      break;
-    default:
-      vlib_cli_output (0, "Unknown error: %d", rv);
-      break;
-    }
-    return 0;
-  }
-
-  vlib_cli_output(vm, "%U\n", format_vnet_sw_if_index_name, vnet_get_main(), sw_if_index);
-  return 0;
-}
-
-VLIB_CLI_COMMAND (kni_connect_command, static) = {
-    .path = "kni connect",
-    .short_help = "kni connect <intfc-name> [hwaddr <addr>]",
-    .function = kni_connect_command_fn,
-};
-*/
 /* Callback for request of changing MTU */
 static int
 kni_change_mtu(uint16_t port_id, unsigned int new_mtu)
@@ -291,10 +168,8 @@ kni_config_network_interface(uint16_t port_id, uint8_t if_up)
 }
 
 /**
- *  * @brief Enable/disable thekni plugin.
- *   *
- *    * Action function shared between message handler and debug CLI.
- *     */
+ *  * @brief Enable/disable KNI based slowpath.
+ *  */
 
 int kni_enable (vlib_main_t * vm,
 			   kni_main_t * km,
@@ -306,26 +181,19 @@ int kni_enable (vlib_main_t * vm,
         struct rte_kni_conf conf;
         dpdk_main_t * dm = &dpdk_main;
         kni_interface_t *ki = NULL;
-          struct rte_kni_ops ops;
-        //  struct rte_eth_dev_info dev_info;
-
-
-        km->num_kni_interfaces=0;
+	struct rte_kni_ops ops;
+	vnet_sw_interface_t *sw;
         vnet_hw_interface_t *hi;
+
+        km->num_kni_interfaces = 0;
         pool_foreach (hi, dm->vnet_main->interface_main.hw_interfaces, ({
 	if(0 == hi->hw_if_index)
-	{
-		clib_warning("Ignoring Loopback for Kji interface");
-	
-	}
-	else
-	{
+		clib_warning("Ignoring Loopback for KNI interface");
+	else {
 	vec_add2 (km->kni_interfaces, ki, 1);
 	ki->sw_if_index = ki - km->kni_interfaces ;
-	vnet_sw_interface_t *sw;
 	sw = vnet_get_hw_sw_interface (dm->vnet_main, hi->hw_if_index); 
 	ki->eth_sw_if_index  = sw->sw_if_index; 
-//	ki->eth_sw_if_index = hi->sw_if_index;
 	ki->eth_hw_if_index = hi->hw_if_index;
 	clib_warning ("hw_if_index %d sw_if_index %d",hi->hw_if_index,
 		hi->sw_if_index);
@@ -380,8 +248,6 @@ int kni_enable (vlib_main_t * vm,
 
         }
 
-
-
   return rv;
 }
 
@@ -428,13 +294,11 @@ kni_enable_disable_command_fn (vlib_main_t * vm,
  *  * @brief CLI command to enable/disable the kni plugin.
  *   */
 VLIB_CLI_COMMAND (sr_content_command, static) = {
-    .path = "kni ",
+    .path = "kni slowpath",
     .short_help =
-    "kni [disable]",
+    "kni slowpath [disable]",
     .function = kni_enable_disable_command_fn,
 };
-
-
 
 clib_error_t *
 kni_cli_init (vlib_main_t * vm)
