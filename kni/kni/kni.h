@@ -19,6 +19,8 @@
 #include <vlib/vlib.h>
 #include <dpdk/device/dpdk.h>
 
+#define kni_vlib_buffer_from_rte_mbuf(x) ((vlib_buffer_t *)(x+1))
+
 #ifndef __KNI_H__
 #define __KNI_H__
 

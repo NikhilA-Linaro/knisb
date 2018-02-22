@@ -6,14 +6,18 @@ AM_CFLAGS += -I$(vpp_install)/dpdk/include/dpdk
 else
 AM_CFLAGS = -Wall -I@TOOLKIT_INCLUDE@ @DPDK@
 endif
-AM_CFLAGS += -mssse3 
+AM_CFLAGS += -mssse3 -fPIC 
 
-AM_LDFLAGS = -module -shared -avoid-version
+AM_LDFLAGS = -module -shared -avoid-version -ldpdk_plugin -ldpdk 
+
+#export LD_LIBRARY_PATH=/usr/lib/vpp_plugins/
+
 
 lib_LTLIBRARIES = libkni.la
 libkni_la_SOURCES = kni/kni.c\
 			 kni/device.c  \
 			 kni/node.c   \
+			 kni/node_sp.c   \
 			 kni/cli.c 
 
 nobase_include_HEADERS = kni/kni.h

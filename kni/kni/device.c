@@ -90,20 +90,24 @@ kni_tx_iface(vlib_main_t * vm,
   int i = 0;
 
   vnet_sw_interface_t *si = vnet_get_sw_interface (vnet_get_main(), ki->sw_if_index);
+#if 0
   if (PREDICT_FALSE(!(si->flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP))) {
     //Drop if interface is down
+    clib_warning ("sw_if_index %d", __LINE__);
     vlib_buffer_free(vm, vlib_frame_vector_args(frame), frame->n_vectors);
     return 0;
   }
-
+#endif
+#define kni_rte_mbuf_from_vlib_buffer(x) (((struct rte_mbuf *)x) - 1)
   u32 n_tx = (n_packets > MAX_SEND)?MAX_SEND:n_packets;
   u32 total_bytes = 0;
   for (i = 0; i < n_tx; i++) {
     struct iovec * iov;
     b = vlib_get_buffer(vm, buffers[i]);
 
-    dpdk_validate_rte_mbuf (vm, b, 0);
-    mb = rte_mbuf_from_vlib_buffer (b);
+    clib_warning ("sw_if_index %d", __LINE__);
+   // dpdk_validate_rte_mbuf (vm, b, 0);
+    mb = kni_rte_mbuf_from_vlib_buffer (b);
     ki->tx_vector[i] = mb;
 /*
     if (ki->tx_msg[i].msg_hdr.msg_iov)
@@ -132,6 +136,7 @@ kni_tx_iface(vlib_main_t * vm,
     total_bytes += ki->tx_msg[i].msg_len;
 */
   }
+    clib_warning ("sw_if_index %d", __LINE__);
     rte_kni_tx_burst(ki->kni,ki->tx_vector,n_tx);
 /*
   if (n_tx) {
@@ -179,7 +184,7 @@ kni_tx (vlib_main_t * vm,
   /* Use the sup intfc to finesse vlan subifs */
   vnet_hw_interface_t *hw = vnet_get_sup_hw_interface (km->vnet_main, tx_sw_if_index);
   tx_sw_if_index = hw->sw_if_index;
-
+#if 0
   uword * p = hash_get (km->kni_interface_index_by_sw_if_index,
                         tx_sw_if_index);
   if (p == 0) {
@@ -188,6 +193,8 @@ kni_tx (vlib_main_t * vm,
   } else {
     ki = vec_elt_at_index (km->kni_interfaces, p[0]);
   }
+#endif
+    ki = vec_elt_at_index (km->kni_interfaces, 0);
 
   return kni_tx_iface(vm, node, frame, ki);
 }
@@ -199,6 +206,20 @@ VLIB_REGISTER_NODE (kni_tx_node,static) = {
   .vector_size = 4,
 };
 
+static clib_error_t *
+kni_interface_add_del_function(vnet_main_t * vnm, u32 hw_if_index, u32 flags)
+{
+	clib_warning ("Calling kni_interface_add_del_function hw_if_index[%d] ",hw_if_index);
+	return 0;
+
+}
+static clib_error_t *
+kni_link_up_down_function(vnet_main_t * vnm, u32 hw_if_index, u32 flags){
+
+	clib_warning ("Calling kni_link_up_down_function hw_if_index[%d] ",hw_if_index);
+
+	return 0;
+}
 /* 
  * Mainly exists to set link_state == admin_state
  * otherwise, e.g. ip6 neighbor discovery breaks
@@ -206,6 +227,7 @@ VLIB_REGISTER_NODE (kni_tx_node,static) = {
 static clib_error_t *
 kni_interface_admin_up_down (vnet_main_t * vnm, u32 hw_if_index, u32 flags)
 {
+  clib_warning ("Calling kni_link_up_down_function hw_if_index[%d] ",hw_if_index);
   uword is_admin_up = (flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP) != 0;
   u32 hw_flags;
   u32 speed_duplex = VNET_HW_INTERFACE_FLAG_FULL_DUPLEX
@@ -226,6 +248,8 @@ VNET_DEVICE_CLASS (kni_dev_class) = {
   .format_device_name = format_kni_interface_name,
   .rx_redirect_to_node = kni_set_interface_next_node,
   .admin_up_down_function = kni_interface_admin_up_down,
+  .interface_add_del_function= kni_interface_add_del_function,
+ // .link_up_down_function= kni_link_up_down_function,
 //  .no_flatten_output_chains = 1,
 };
 

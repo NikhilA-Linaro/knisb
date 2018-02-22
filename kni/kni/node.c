@@ -42,10 +42,7 @@
 vlib_node_registration_t kni_rx_node;
 
 enum {
-  KNI_RX_NEXT_IP4_INPUT,
-  KNI_RX_NEXT_IP6_INPUT,
-  KNI_RX_NEXT_ETHERNET_INPUT,
-  KNI_RX_NEXT_DROP,
+  KNI_RX_NEXT_INTERFACE_OUTPUT,
   KNI_RX_N_NEXT,
 };
 
@@ -125,6 +122,7 @@ kni_rx_iface(vlib_main_t * vm,
 	unsigned num;
 	u32 mb_index;
 	uword n_rx_bytes = 0;
+        rte_kni_handle_request(ki->kni);
 
 	//  const uword buffer_size = vlib_buffer_free_list_buffer_size ( vm,
 	//                                VLIB_BUFFER_DEFAULT_FREE_LIST_INDEX);
@@ -135,10 +133,10 @@ kni_rx_iface(vlib_main_t * vm,
 	vnet_sw_interface_t * si;
 	u8 admin_down;
 	uword len = 0;
-	u32 next_index =  KNI_RX_NEXT_ETHERNET_INPUT;
+	u32 next_index =  KNI_RX_NEXT_INTERFACE_OUTPUT;
 	u32 n_left_to_next, *to_next;
 	vlib_buffer_free_list_t *fl;
-
+	 //clib_warning ("Entering kni_rx_iface");
 	vnm = vnet_get_main();
 
 	n_buffers = kni_rx_burst(ki);
@@ -167,9 +165,11 @@ kni_rx_iface(vlib_main_t * vm,
 
 			ASSERT (mb0);
 
-			b0 = vlib_buffer_from_rte_mbuf (mb0);
-
+			b0 = kni_vlib_buffer_from_rte_mbuf (mb0);
+			clib_warning("RX sw_if_index[VLIB_RX] [%d] Tx sw_if_index[VLIB_TX] [%d]",ki->sw_if_index,
+								ki->eth_sw_if_index);
 			vnet_buffer (b0)->sw_if_index[VLIB_RX] = ki->sw_if_index;
+			vnet_buffer (b0)->sw_if_index[VLIB_TX] = ki->eth_sw_if_index;
 			//b0->buffer_pool_index =;/*TODO*/
 			/* Prefetch one next segment if it exists. */
 
@@ -178,35 +178,19 @@ kni_rx_iface(vlib_main_t * vm,
 			to_next[0] = bi0;
 			to_next++;
 			n_left_to_next--;
-			/*TODO*/
-			//    next0 = dpdk_rx_next_from_etype (mb0);
 
-			//          dpdk_rx_error_from_mb (mb0, &next0, &error0);
-			//         b0->error = node->errors[error0];
+			next0 = KNI_RX_NEXT_INTERFACE_OUTPUT;
 
-			//          offset0 = device_input_next_node_advance[next0];
-			offset0 = 0;
-			b0->current_data = mb0->data_off + offset0 - RTE_PKTMBUF_HEADROOM;
-			b0->flags |= 0; //device_input_next_node_flags[next0];
-			vnet_buffer (b0)->l3_hdr_offset = b0->current_data;
-			vnet_buffer (b0)->l2_hdr_offset =
-				mb0->data_off - RTE_PKTMBUF_HEADROOM;
-			b0->current_length = mb0->data_len - offset0;
+			b0->current_data = mb0->data_off - RTE_PKTMBUF_HEADROOM;
+			b0->flags |= 0;
+			b0->current_length = mb0->data_len;
 			n_rx_bytes += mb0->pkt_len;
 
-			/* Process subsequent segments of multi-segment packets */
-			//  dpdk_process_subseq_segs (vm, b0, mb0, fl);
-
-			/*
-			 *            * Turn this on if you run into
-			 *                       * "bad monkey" contexts, and you want to know exactly
-			 *                                  * which nodes they've visited... See main.c...
-			 *                                             */
-			//VLIB_BUFFER_TRACE_TRAJECTORY_INIT (b0);
+			VLIB_BUFFER_TRACE_TRAJECTORY_INIT (b0);
 
 			/* Do we have any driver RX features configured on the interface? */
-			//   vnet_feature_start_device_input_x1 (xd->vlib_sw_if_index, &next0,
-			//                                     b0);
+//			vnet_feature_start_device_input_x1 (xd->vlib_sw_if_index, &next0,
+//			                                     b0);
 
 			vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
 					to_next, n_left_to_next,
@@ -281,10 +265,7 @@ VLIB_REGISTER_NODE (kni_rx_node) = {
 
   .n_next_nodes = KNI_RX_N_NEXT,
   .next_nodes = {
-    [KNI_RX_NEXT_IP4_INPUT] = "ip4-input-no-checksum",
-    [KNI_RX_NEXT_IP6_INPUT] = "ip6-input",
-    [KNI_RX_NEXT_DROP] = "error-drop",
-    [KNI_RX_NEXT_ETHERNET_INPUT] = "ethernet-input",
+    [KNI_RX_NEXT_INTERFACE_OUTPUT] = "interface-output",
   },
 };
 
