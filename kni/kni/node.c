@@ -104,7 +104,6 @@ kni_input_burst(kni_interface_t * ki)
           n_this_chunk = rte_kni_rx_burst(ki->kni, ki->rx_vector + n_buffers, n_left);
           n_buffers += n_this_chunk;
           n_left -= n_this_chunk;
-        //   rte_kni_handle_request(xd->kni);
           /* Empirically, DPDK r1.8 produces vectors w/ 32 or fewer elts */
           if (n_this_chunk < 32)
             break;

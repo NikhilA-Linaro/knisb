@@ -141,6 +141,48 @@ kni_flag_change (vnet_main_t * vnm, vnet_hw_interface_t * hi, u32 flags)
   return old;
 }
 
+static int
+kni_trigered_interface_admin_up_down (uint16_t port_id, uint8_t if_up)
+{
+  kni_main_t * km = &kni_main;
+  u32 hw_if_index = 0;
+  vnet_main_t * vnm = km->vnet_main;
+  kni_interface_t *ki = NULL;
+ // u32 hw_flags;
+
+ /*Finding Ki interface*/
+  ki = vec_elt_at_index(km->kni_interfaces, port_id);
+  if(!ki)
+  clib_error ("No kni_interface_t at index [%d] ",  port_id);
+
+ /*Fetch hardware index*/
+  hw_if_index = ki->hw_if_index;
+
+ /*Fetch hardware Interface*/
+  vnet_hw_interface_t *hw = vnet_get_hw_interface (vnm, hw_if_index);
+
+  clib_warning ("kni_interface_t at index [%d] hw_if_index[%d] for kni_trigered_interface_admin_up_down ",  port_id,
+													hw_if_index);
+
+   if(if_up)
+   {
+     /*Fetch Software Interface and unset HIDDEN field*/
+     vnet_sw_interface_t *si = vnet_get_hw_sw_interface (vnm, hw_if_index);
+     si->flags &= ~VNET_SW_INTERFACE_FLAG_HIDDEN;
+
+     /*Set Software Interface VNET_SW_INTERFACE_FLAG_ADMIN_UP*/
+     vnet_sw_interface_set_flags (vnm, hw->sw_if_index,
+                                   VNET_SW_INTERFACE_FLAG_ADMIN_UP);
+   }
+   else
+   {
+     /*Set Software Interface Down*/
+     vnet_sw_interface_set_flags (vnm, hw->sw_if_index,
+                                   0);/*Down the interface*/
+   }
+  return 0;
+}
+
 /* Callback for request of configuring network interface up/down */
 static int
 kni_config_network_interface(uint16_t port_id, uint8_t if_up)
@@ -209,19 +251,25 @@ int kni_enable (vlib_main_t * vm,
 	km->num_kni_interfaces++;
 	}
         }));
+	if(!km->num_kni_interfaces)
+		return VNET_API_ERROR_INVALID_VALUE;
 
+	km->is_disabled = 0;
         rte_kni_init(km->num_kni_interfaces);
         for (i = 0; i< km->num_kni_interfaces; i++)
         {
                 memset(&ops, 0, sizeof(ops));
                 ops.port_id = i;
                 ops.change_mtu = kni_change_mtu;
-                clib_warning ("Registering kni_config_network_interface");
-                ops.config_network_if = kni_config_network_interface;
+                clib_warning ("Registering ops.config_network_if");
+                //ops.config_network_if = kni_config_network_interface;
+                ops.config_network_if = kni_trigered_interface_admin_up_down;
 
                 ki = vec_elt_at_index(km->kni_interfaces, i);
                 memset(&conf, 0, sizeof(conf));
                 snprintf(conf.name, RTE_KNI_NAMESIZE, "vEth%u", i);
+                conf.core_id = 1; /*Added now*/
+                conf.force_bind = 1;
                 conf.group_id = i;
                 conf.mbuf_size = 2048;
                 ki->kni = rte_kni_alloc(dm->pktmbuf_pools[0], &conf,  &ops);
@@ -266,21 +314,16 @@ kni_enable_disable_command_fn (vlib_main_t * vm,
                                    vlib_cli_command_t * cmd)
 {
   kni_main_t * km = &kni_main;
-  int enable_disable = 1;
-
   int rv;
+  int enable_disable = 1;
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT) {
-    if (unformat (input, "disable"))
-      enable_disable = 0;
-    else
-      break;
+	clib_warning("Input : %s", input);
   }
 
   if(!km->is_disabled)
     return clib_error_return (0, "Kni already enabled ");
 
-  if(enable_disable )
-      rv = kni_enable (vm, km, enable_disable);
+  rv = kni_enable (vm, km, enable_disable);
 
  switch(rv) {
   case 0:
@@ -289,7 +332,9 @@ kni_enable_disable_command_fn (vlib_main_t * vm,
   case VNET_API_ERROR_UNIMPLEMENTED:
     return clib_error_return (0, "Cli not implemented ");
     break;
-
+  case VNET_API_ERROR_INVALID_VALUE:
+    return clib_error_return (0, "No Interface detected");
+    break;
   default:
     return clib_error_return (0, "kni_enable_disable returned %d",
                               rv);
@@ -301,10 +346,10 @@ kni_enable_disable_command_fn (vlib_main_t * vm,
 /**
  *  * @brief CLI command to enable/disable the kni plugin.
  *   */
-VLIB_CLI_COMMAND (sr_content_command, static) = {
-    .path = "kni slowpath",
+VLIB_CLI_COMMAND (sr_content_command,static) = {
+    .path = "kni slowpath enable",
     .short_help =
-    "kni slowpath [disable]",
+    "kni slowpath enable",
     .function = kni_enable_disable_command_fn,
 };
 
