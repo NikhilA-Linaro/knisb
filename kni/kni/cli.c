@@ -195,10 +195,16 @@ int kni_enable (vlib_main_t * vm,
 	sw = vnet_get_hw_sw_interface (dm->vnet_main, hi->hw_if_index); 
 	ki->eth_sw_if_index  = sw->sw_if_index; 
 	ki->eth_hw_if_index = hi->hw_if_index;
-	clib_warning ("hw_if_index %d sw_if_index %d",hi->hw_if_index,
-		hi->sw_if_index);
-	hash_set(km->kni_interface_index_by_sw_if_index,hi->sw_if_index,ki->sw_if_index);
-	hash_set(km->kni_interface_index_by_eth_index,ki->sw_if_index,hi->sw_if_index);/*FIXME: Name of the has needs to be change to ethInterfaceByKniInterface*/
+	clib_warning ("hw_if_index %d sw_if_index %d Mac [%02x:%02x:%02x:%02x:%02x:%02x]",
+										hi->hw_if_index,
+										hi->sw_if_index,
+										hi->hw_address[0],
+										hi->hw_address[1],
+										hi->hw_address[2],
+										hi->hw_address[3],
+										hi->hw_address[4],
+										hi->hw_address[5]
+											);
 
 	km->num_kni_interfaces++;
 	}
@@ -238,6 +244,8 @@ int kni_enable (vlib_main_t * vm,
                 clib_warning ("Called ethernet_register_interface ,ret [%d] got hw_if_index [%d] ",
                                 error,
                                 ki->hw_if_index);
+	hash_set(km->kni_interface_index_by_eth_index, ki->eth_hw_if_index,ki->hw_if_index);
+	hash_set(km->kni_interface_index_by_sw_if_index,ki->hw_if_index,i);
         clib_warning ("ki_hw_if_index %d ki_sw_if_index %d dpdk_hw_if_index [%d] dpdk_sw_if_index[%d]",ki->hw_if_index,
 												ki->sw_if_index,
 												ki->eth_hw_if_index ,

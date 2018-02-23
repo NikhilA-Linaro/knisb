@@ -33,6 +33,7 @@
  _(UNKNOWN, "unknown error")
 
 #define kni_vlib_buffer_from_rte_mbuf(x) ((vlib_buffer_t *)(x+1))
+#define kni_rte_mbuf_from_vlib_buffer(x) (((struct rte_mbuf *)x) - 1)
 
 typedef enum {
 #define _(sym,str) KNI_ERROR_##sym,

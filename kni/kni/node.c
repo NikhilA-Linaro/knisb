@@ -166,10 +166,10 @@ kni_input_iface(vlib_main_t * vm,
 			ASSERT (mb0);
 
 			b0 = kni_vlib_buffer_from_rte_mbuf (mb0);
-			clib_warning("RX sw_if_index[VLIB_RX] [%d] Tx sw_if_index[VLIB_TX] [%d]",ki->sw_if_index,
-								ki->eth_sw_if_index);
-			vnet_buffer (b0)->sw_if_index[VLIB_RX] = ki->sw_if_index;
-			vnet_buffer (b0)->sw_if_index[VLIB_TX] = ki->eth_sw_if_index;
+			clib_warning("RX hw_if_index[VLIB_RX] [%d] Tx hw_if_index[VLIB_TX] [%d]",ki->hw_if_index,
+								ki->eth_hw_if_index);
+			vnet_buffer (b0)->sw_if_index[VLIB_RX] = ki->hw_if_index;
+			vnet_buffer (b0)->sw_if_index[VLIB_TX] = ki->eth_hw_if_index;
 			//b0->buffer_pool_index =;/*TODO*/
 			/* Prefetch one next segment if it exists. */
 

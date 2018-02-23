@@ -152,9 +152,11 @@ slowpath_node_fn (vlib_main_t * vm,
 	{
           u32 bi0;
 	  vlib_buffer_t * b0;
+	  vnet_sw_interface_t *sw;
           u32 next0 = SLOWPATH_NEXT_INTERFACE_OUTPUT;
           u32 sw_if_index0;
-	 u8 *pbi0;
+          kni_interface_t *ki = NULL;
+	  u8 *pbi0;
 
           /* speculatively enqueue b0 to the current next frame */
 	  bi0 = from[0];
@@ -174,13 +176,9 @@ slowpath_node_fn (vlib_main_t * vm,
 					   bi0, next0);
            continue;
 	}
-	  clib_warning("Value of sw_if_index0 [%d]",sw_if_index0);
-	  pbi0 = hash_get(km->kni_interface_index_by_sw_if_index,sw_if_index0);
-	  clib_warning("Value of sw_if_index0 [%d],pbi0[%p]",sw_if_index0,pbi0);
-	  clib_warning("Value of sw_if_index0 [%d],*pbi0[%d]",sw_if_index0,*pbi0);
-          /* Send pkt back out the RX interface */
-          //vnet_buffer(b0)->sw_if_index[VLIB_TX] = *pbi0;
-          vnet_buffer(b0)->sw_if_index[VLIB_TX] = 3;/*FIXME*/
+	  pbi0 = hash_get(km->kni_interface_index_by_eth_index, sw_if_index0);
+	  clib_warning("Value of sw_if_index0 [%d],pbi0[%d]",sw_if_index0,*pbi0);
+          vnet_buffer(b0)->sw_if_index[VLIB_TX] = *pbi0;
 
           if (PREDICT_FALSE((node->flags & VLIB_NODE_FLAG_TRACE) 
                             && (b0->flags & VLIB_BUFFER_IS_TRACED))) {

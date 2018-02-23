@@ -84,12 +84,13 @@ kni_tx_iface(vlib_main_t * vm,
   u32 * buffers = vlib_frame_args (frame);
   uword n_packets = frame->n_vectors;
   vlib_buffer_t * b;
+  u32 n_successful_tx = 0;
   struct rte_mbuf *mb;
-
   int i = 0;
+  u32 total_bytes = 0;
 
-  vnet_sw_interface_t *si = vnet_get_sw_interface (vnet_get_main(), ki->sw_if_index);
 #if 0
+  vnet_sw_interface_t *si = vnet_get_sw_interface (vnet_get_main(), ki->sw_if_index);
   if (PREDICT_FALSE(!(si->flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP))) {
     //Drop if interface is down
     clib_warning ("sw_if_index %d", __LINE__);
@@ -97,46 +98,21 @@ kni_tx_iface(vlib_main_t * vm,
     return 0;
   }
 #endif
-#define kni_rte_mbuf_from_vlib_buffer(x) (((struct rte_mbuf *)x) - 1)
   u32 n_tx = (n_packets > MAX_SEND)?MAX_SEND:n_packets;
-  u32 total_bytes = 0;
   for (i = 0; i < n_tx; i++) {
     struct iovec * iov;
     b = vlib_get_buffer(vm, buffers[i]);
 
     clib_warning ("sw_if_index %d", __LINE__);
-   // dpdk_validate_rte_mbuf (vm, b, 0);
     mb = kni_rte_mbuf_from_vlib_buffer (b);
     ki->tx_vector[i] = mb;
-/*
-    if (ki->tx_msg[i].msg_hdr.msg_iov)
-      _vec_len(ki->tx_msg[i].msg_hdr.msg_iov) = 0; //Reset vector
-
-    vec_add2 (ki->tx_msg[i].msg_hdr.msg_iov, iov, 1);
-    iov->iov_base = b->data + b->current_data;
-    iov->iov_len = b->current_length;
-    ki->tx_msg[i].msg_len = b->current_length;
-    if (PREDICT_FALSE (b->flags & VLIB_BUFFER_NEXT_PRESENT)) {
-      do {
-        b = vlib_get_buffer (vm, b->next_buffer);
-        vec_add2 (ki->tx_msg[i].msg_hdr.msg_iov, iov, 1);
-        iov->iov_base = b->data + b->current_data;
-        iov->iov_len = b->current_length;
-        ki->tx_msg[i].msg_len += b->current_length;
-      } while (b->flags & VLIB_BUFFER_NEXT_PRESENT);
-    }
-
-    ki->tx_msg[i].msg_hdr.msg_name = NULL;
-    ki->tx_msg[i].msg_hdr.msg_namelen = 0;
-    ki->tx_msg[i].msg_hdr.msg_iovlen = _vec_len(ki->tx_msg[i].msg_hdr.msg_iov);
-    ki->tx_msg[i].msg_hdr.msg_control = NULL;
-    ki->tx_msg[i].msg_hdr.msg_controllen = 0;
-    ki->tx_msg[i].msg_hdr.msg_flags = MSG_DONTWAIT;
-    total_bytes += ki->tx_msg[i].msg_len;
-*/
   }
     clib_warning ("sw_if_index %d", __LINE__);
-    rte_kni_tx_burst(ki->kni,ki->tx_vector,n_tx);
+    n_successful_tx = rte_kni_tx_burst(ki->kni,ki->tx_vector,n_tx);
+       if(n_successful_tx < n_tx)
+        {
+           clib_warning ("Only able to TX [%d] out of [%d] ",n_successful_tx, n_tx);
+        }
 /*
   if (n_tx) {
     int tx;
@@ -168,8 +144,11 @@ kni_tx (vlib_main_t * vm,
 {
   u32 * buffers = vlib_frame_args (frame);
   kni_main_t * km = &kni_main;
-  kni_interface_t * ki;
-
+  kni_interface_t * ki = NULL;
+  u32 tx_hw_if_index = 0;
+  vnet_sw_interface_t *sw = NULL;
+  vnet_hw_interface_t *hw = NULL;
+  u8 *ki_index = NULL;
   if (!frame->n_vectors)
     return 0;
 
@@ -180,22 +159,16 @@ kni_tx (vlib_main_t * vm,
 
   ASSERT(tx_sw_if_index != (u32)~0);
 
-  /* Use the sup intfc to finesse vlan subifs */
-  vnet_hw_interface_t *hw = vnet_get_sup_hw_interface (km->vnet_main, tx_sw_if_index);
-  tx_sw_if_index = hw->sw_if_index;
-#if 0
-  uword * p = hash_get (km->kni_interface_index_by_sw_if_index,
-                        tx_sw_if_index);
-  if (p == 0) {
-    clib_warning ("sw_if_index %d unknown", tx_sw_if_index);
-    return 0;
-  } else {
-    ki = vec_elt_at_index (km->kni_interfaces, p[0]);
-  }
-#endif
-    ki = vec_elt_at_index (km->kni_interfaces, 0);
-
-  return kni_tx_iface(vm, node, frame, ki);
+    ki_index = hash_get(km->kni_interface_index_by_sw_if_index,tx_sw_if_index);
+    ki = vec_elt_at_index (km->kni_interfaces, *ki_index);
+     clib_warning("check index tx_sw_if_index[%d] *ki_index[%d] ", tx_sw_if_index,
+							*ki_index);
+   if(ki)
+     return kni_tx_iface(vm, node, frame, ki);
+   else{
+     clib_warning("Error index [%d] ", tx_sw_if_index);
+     return 0;
+       }
 }
 
 VLIB_REGISTER_NODE (kni_tx_node,static) = {
