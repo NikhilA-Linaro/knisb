@@ -71,7 +71,7 @@ slowpath_node_fn (vlib_main_t * vm,
   u32 n_left_from, * from, * to_next;
   slowpath_next_t next_index;
   u32 pkts_frwrded = 0;
-  //clib_warning ("Returning from slowpath_node_fn ");
+  //DBG_KNI ("Returning from slowpath_node_fn ");
   //return 0;
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
@@ -110,13 +110,13 @@ slowpath_node_fn (vlib_main_t * vm,
           
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
           sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
-	  clib_warning("Value of sw_if_index0 [%d],sw_if_index1[%d]",sw_if_index0,sw_if_index1);
+	  DBG_KNI("Value of sw_if_index0 [%d],sw_if_index1[%d]",sw_if_index0,sw_if_index1);
 	  pbi0 = hash_get(km->kni_interface_index_by_sw_if_index,sw_if_index0);
           vnet_buffer(b0)->sw_if_index[VLIB_TX] = *pbi0;
 	  pbi1 = hash_get(km->kni_interface_index_by_sw_if_index,sw_if_index1);
           vnet_buffer(b1)->sw_if_index[VLIB_TX] = *pbi1;
-	  clib_warning("Value of sw_if_index0 [%d],pbi0[%p]",sw_if_index0,pbi0);
-	  clib_warning("Value of sw_if_index0 [%d],*pbi0[%d]",sw_if_index0,*pbi0);
+	  DBG_KNI("Value of sw_if_index0 [%d],pbi0[%p]",sw_if_index0,pbi0);
+	  DBG_KNI("Value of sw_if_index0 [%d],*pbi0[%d]",sw_if_index0,*pbi0);
      
           /* Send pkt back out the RX interface */
 
@@ -177,7 +177,7 @@ slowpath_node_fn (vlib_main_t * vm,
            continue;
 	}
 	  pbi0 = hash_get(km->kni_interface_index_by_eth_index, sw_if_index0);
-	  clib_warning("Value of sw_if_index0 [%d],pbi0[%d]",sw_if_index0,*pbi0);
+	  DBG_KNI("Value of sw_if_index0 [%d],pbi0[%d]",sw_if_index0,*pbi0);
           vnet_buffer(b0)->sw_if_index[VLIB_TX] = *pbi0;
 
           if (PREDICT_FALSE((node->flags & VLIB_NODE_FLAG_TRACE) 

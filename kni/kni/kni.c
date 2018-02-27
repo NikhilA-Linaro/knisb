@@ -35,7 +35,8 @@ static uword
 kni_process(vlib_main_t * vm, vlib_node_runtime_t * rt, vlib_frame_t * f)
 {
 	clib_error_t * error = 0;
-	clib_warning ("Hack!! Returning from kni_process");
+	u32 i=0;
+	DBG_KNI ("Returning from kni_process");
 	return error;
 #if 0
 	u32 i =0;
@@ -61,7 +62,7 @@ kni_process(vlib_main_t * vm, vlib_node_runtime_t * rt, vlib_frame_t * f)
 	ki->sw_if_index = ki - km->kni_interfaces ;
 	ki->eth_sw_if_index = hi->sw_if_index;
 	ki->eth_hw_if_index = hi->hw_if_index;
-	clib_warning ("hw_if_index %d sw_if_index %d",hi->hw_if_index,
+	DBG_KNI ("hw_if_index %d sw_if_index %d",hi->hw_if_index,
 					hi->sw_if_index);
 	hash_set(km->kni_interface_index_by_sw_if_index,hi->sw_if_index,ki->sw_if_index);
 	hash_set(km->kni_interface_index_by_eth_index,ki->sw_if_index,hi->sw_if_index);/*FIXME: Name of the has needs to be change to ethInterfaceByKniInterface*/
@@ -76,7 +77,7 @@ kni_process(vlib_main_t * vm, vlib_node_runtime_t * rt, vlib_frame_t * f)
 		memset(&ops, 0, sizeof(ops));
 		ops.port_id = i;
 		ops.change_mtu = kni_change_mtu;
-	        clib_warning ("Registering kni_config_network_interface");
+	        DBG_KNI ("Registering kni_config_network_interface");
         	ops.config_network_if = kni_config_network_interface;
 
 		ki = vec_elt_at_index(km->kni_interfaces, i);
@@ -101,7 +102,7 @@ kni_process(vlib_main_t * vm, vlib_node_runtime_t * rt, vlib_frame_t * f)
 			 ki - km->kni_interfaces /* device instance */,
 			 hw_addr /* ethernet address */,
 			 &ki->hw_if_index, kni_flag_change);
-		clib_warning ("Called ethernet_register_interface ,ret [%d] got hw_if_index [%d] ",
+		DBG_KNI ("Called ethernet_register_interface ,ret [%d] got hw_if_index [%d] ",
 				error,
 				ki->hw_if_index);
 
@@ -111,10 +112,10 @@ kni_process(vlib_main_t * vm, vlib_node_runtime_t * rt, vlib_frame_t * f)
 		uword event_type;
 		while(1)
 		{
-		clib_warning ("Waiting for the event");
+		DBG_KNI ("Waiting for the event");
 		vlib_process_wait_for_event (vm);
 		event_type = vlib_process_get_events(vm,&event_data);
-		clib_warning ("event_type[%d] event_data[%d]", event_type,event_data[0]);
+		DBG_KNI ("event_type[%d] event_data[%d]", event_type,event_data[0]);
 		}
 		*/
 #endif
@@ -131,16 +132,23 @@ VLIB_REGISTER_NODE (kni_process_node,static) = {
 };
 /* *INDENT-ON* */
 
+
+
+
+
 clib_error_t *kni_init(vlib_main_t *vm)
 {
 	clib_error_t * error = 0;
 	kni_main_t * km = &kni_main;
-	dpdk_main_t * dm = &dpdk_main;
-
+//	dpdk_main_t * dm = &dpdk_main;
+	u32 i = 0;
 	km->vlib_main = vm;
 	km->vnet_main = vnet_get_main();
-	km->dpdk_main = &dpdk_main;
-	km->is_disabled = 1;	
+//	km->dpdk_main = &dpdk_main;
+	km->is_disabled = 1;
+	DBG_KNI("\n Entered \n");
+	/* main thread 1st */
+
 	return error;
 }
 VLIB_INIT_FUNCTION(kni_init);

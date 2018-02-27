@@ -22,8 +22,21 @@
 #ifndef __KNI_H__
 #define __KNI_H__
 
+#define KNI_DEBUG_LOG 0
+
+
+#if KNI_DEBUG_LOG == 1
+#define DBG_KNI(args...) clib_warning(args);
+#else
+#define DBG_KNI(args...)
+#endif
+
+
+
 #define MAX_SEND 256
 #define MAX_RECV 256
+
+#define NB_MBUF_KNI   (2048)
 
 #define foreach_kni_error                            \
   /* Must be first. */                                  \
@@ -52,14 +65,8 @@ typedef struct {
   u32 per_interface_next_index;
   u8 active;                    /* for delete */
 
-  /* mtu count, mtu buffers */
-  u32 mtu_bytes;
-  u32 mtu_buffers;
+  char mac_addr[ETHER_ADDR_LEN]; /* MAC address assigned to KNI */
 
-  /* kni */
-  int kni_fd;
-  int sock_fd;
-  int rx_ready;
   struct rte_mbuf *rx_vector[MAX_RECV];
   struct rte_mbuf *tx_vector[MAX_SEND];
 } kni_interface_t;
@@ -92,14 +99,27 @@ typedef struct {
   /* renumbering table */
   u32 * show_dev_instance_by_real_dev_instance;
 
+    /* mempool */
+  struct rte_mempool **pktmbuf_pools;
+
   /* 1 => disable CLI */
   int is_disabled;
 
   /* convenience */
   vlib_main_t * vlib_main;
   vnet_main_t * vnet_main;
-  dpdk_main_t * dpdk_main;
+//  dpdk_main_t * dpdk_main;
 } kni_main_t;
+
+typedef struct
+{
+  /* must be first */
+  struct rte_pktmbuf_pool_private mbp_priv;
+  u8 buffer_pool_index;
+} kni_mempool_private_t;
+
+
+
 
 extern vnet_device_class_t kni_dev_class;
 extern vlib_node_registration_t kni_input_node;

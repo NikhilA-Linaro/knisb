@@ -52,6 +52,13 @@ static struct rte_eth_conf port_conf = {
                 .mq_mode = ETH_MQ_TX_NONE,
         },
 };
+clib_error_t *
+kni_buffer_pool_create (vlib_main_t * vm, unsigned num_mbufs,
+                         unsigned socket_id);
+clib_error_t *
+kni_pool_create (vlib_main_t * vm, u8 * pool_name, u32 elt_size,
+                  u32 num_elts, u32 pool_priv_size, u16 cache_size, u8 numa,
+                  struct rte_mempool **_mp, vlib_physmem_region_index_t * pri);
 
 
 /* Total octets in ethernet header */
@@ -71,11 +78,11 @@ kni_change_mtu(uint16_t port_id, unsigned int new_mtu)
         struct rte_eth_conf conf;
 
         if (port_id >= rte_eth_dev_count()) {
-                clib_warning("Invalid port id %d\n", port_id);
+                DBG_KNI("Invalid port id %d\n", port_id);
                 return -EINVAL;
         }
 
-        clib_warning("Change MTU of port %d to %u\n", port_id, new_mtu);
+        DBG_KNI("Change MTU of port %d to %u\n", port_id, new_mtu);
 
         /* Stop specific port */
         rte_eth_dev_stop(port_id);
@@ -92,13 +99,13 @@ kni_change_mtu(uint16_t port_id, unsigned int new_mtu)
                                                         KNI_ENET_FCS_SIZE;
         ret = rte_eth_dev_configure(port_id, 1, 1, &conf);
         if (ret < 0) {
-                clib_warning("Fail to reconfigure port %d\n", port_id);
+                DBG_KNI("Fail to reconfigure port %d\n", port_id);
                 return ret;
         }
         /* Restart specific port */
         ret = rte_eth_dev_start(port_id);
         if (ret < 0) {
-                clib_warning("Fail to restart port %d\n", port_id);
+                DBG_KNI("Fail to restart port %d\n", port_id);
                 return ret;
         }
 
@@ -107,13 +114,16 @@ kni_change_mtu(uint16_t port_id, unsigned int new_mtu)
 static u32
 kni_flag_change (vnet_main_t * vnm, vnet_hw_interface_t * hi, u32 flags)
 {
+  u32 old = 0;
+  DBG_KNI("by passing all work at kni_flag_change.Please have a look!!");
+  return old;
+#if 0
   dpdk_main_t *dm = &dpdk_main;
   uword *p;
   kni_main_t * km = &kni_main;
 //  vnet_hw_interface_t * l_hi;
   dpdk_device_t *xd = vec_elt_at_index (dm->devices, hi->dev_instance);
-  u32 old = 0;
-  clib_warning ("Entering kni_flag_change hw_if_index[%d] sw_if_index[%d] ",hi->hw_if_index,
+  DBG_KNI ("Entering kni_flag_change hw_if_index[%d] sw_if_index[%d] ",hi->hw_if_index,
 							hi->sw_if_index );
    
   if (ETHERNET_INTERFACE_FLAG_CONFIG_PROMISC (flags))
@@ -139,6 +149,7 @@ kni_flag_change (vnet_main_t * vnm, vnet_hw_interface_t * hi, u32 flags)
       dpdk_device_setup (xd);
     }
   return old;
+#endif
 }
 
 static int
@@ -161,7 +172,7 @@ kni_trigered_interface_admin_up_down (uint16_t port_id, uint8_t if_up)
  /*Fetch hardware Interface*/
   vnet_hw_interface_t *hw = vnet_get_hw_interface (vnm, hw_if_index);
 
-  clib_warning ("kni_interface_t at index [%d] hw_if_index[%d] for kni_trigered_interface_admin_up_down ",  port_id,
+  DBG_KNI ("kni_interface_t at index [%d] hw_if_index[%d] for kni_trigered_interface_admin_up_down ",  port_id,
 													hw_if_index);
 
    if(if_up)
@@ -190,11 +201,11 @@ kni_config_network_interface(uint16_t port_id, uint8_t if_up)
         int ret = 0;
 
         if (port_id >= rte_eth_dev_count() || port_id >= RTE_MAX_ETHPORTS) {
-                clib_warning("Invalid port id %d\n", port_id);
+                DBG_KNI("Invalid port id %d\n", port_id);
                 return -EINVAL;
         }
 
-        clib_warning("Configure network interface of %d %s\n",
+        DBG_KNI("Configure network interface of %d %s\n",
                                         port_id, if_up ? "up" : "down");
 
         if (if_up != 0) { /* Configure network interface up */
@@ -204,9 +215,132 @@ kni_config_network_interface(uint16_t port_id, uint8_t if_up)
                 rte_eth_dev_stop(port_id);
 
         if (ret < 0)
-                clib_warning("Failed to start port %d\n", port_id);
+                DBG_KNI("Failed to start port %d\n", port_id);
 
         return ret;
+}
+clib_error_t *
+kni_pool_create (vlib_main_t * vm, u8 * pool_name, u32 elt_size,
+                  u32 num_elts, u32 pool_priv_size, u16 cache_size, u8 numa,
+                  struct rte_mempool **_mp, vlib_physmem_region_index_t * pri)
+{
+  struct rte_mempool *mp;
+  vlib_physmem_region_t *pr;
+  clib_error_t *error = 0;
+  u32 size, obj_size;
+  i32 ret;
+
+  obj_size = rte_mempool_calc_obj_size (elt_size, 0, 0);
+#if RTE_VERSION < RTE_VERSION_NUM(17, 11, 0, 0)
+  size = rte_mempool_xmem_size (num_elts, obj_size, 21);
+#else
+  size = rte_mempool_xmem_size (num_elts, obj_size, 21, 0);
+#endif
+
+  error =
+    vlib_physmem_region_alloc (vm, (i8 *) pool_name, size, numa, 0, pri);
+  if (error)
+    return error;
+
+  pr = vlib_physmem_get_region (vm, pri[0]);
+
+  mp =
+    rte_mempool_create_empty ((i8 *) pool_name, num_elts, elt_size,
+                              512, pool_priv_size, numa, 0);
+  if (!mp)
+    return clib_error_return (0, "failed to create %s", pool_name);
+
+  rte_mempool_set_ops_byname (mp, RTE_MBUF_DEFAULT_MEMPOOL_OPS, NULL);
+
+#if RTE_VERSION < RTE_VERSION_NUM(17, 11, 0, 0)
+  ret =
+    rte_mempool_populate_phys_tab (mp, pr->mem, pr->page_table, pr->n_pages,
+                                   pr->log2_page_size, NULL, NULL);
+#else
+  ret =
+    rte_mempool_populate_iova_tab (mp, pr->mem, pr->page_table, pr->n_pages,
+                                   pr->log2_page_size, NULL, NULL);
+
+#endif
+  if (ret != (i32) mp->size)
+    {
+      rte_mempool_free (mp);
+      return clib_error_return (0, "failed to populate %s", pool_name);
+    }
+
+  _mp[0] = mp;
+
+  return 0;
+}
+
+
+clib_error_t *
+kni_buffer_pool_create (vlib_main_t * vm, unsigned num_mbufs,
+                         unsigned socket_id)
+{
+  kni_main_t *km = &kni_main;
+  struct rte_mempool *rmp;
+  kni_mempool_private_t priv;
+  vlib_physmem_region_index_t pri;
+  clib_error_t *error = 0;
+  u8 *pool_name;
+  u32 elt_size, i;
+
+  vec_validate_aligned (km->pktmbuf_pools, socket_id, CLIB_CACHE_LINE_BYTES);
+
+  /* pool already exists, nothing to do */
+  if (km->pktmbuf_pools[socket_id])
+    return 0;
+
+  pool_name = format (0, "kni_mbuf_pool_socket%u%c", socket_id, 0);
+
+  elt_size = sizeof (struct rte_mbuf) +
+    VLIB_BUFFER_HDR_SIZE /* priv size */  +
+    VLIB_BUFFER_PRE_DATA_SIZE + VLIB_BUFFER_DATA_SIZE;  /*data room size */
+
+  error =
+    kni_pool_create (vm, pool_name, elt_size, num_mbufs,
+                      sizeof (kni_mempool_private_t), 512, socket_id,
+                      &rmp, &pri);
+
+  vec_free (pool_name);
+
+  if (!error)
+    {
+      priv.mbp_priv.mbuf_data_room_size = VLIB_BUFFER_PRE_DATA_SIZE +
+        VLIB_BUFFER_DATA_SIZE;
+      priv.mbp_priv.mbuf_priv_size = VLIB_BUFFER_HDR_SIZE;
+
+      /* call the mempool priv initializer */
+      rte_pktmbuf_pool_init (rmp, &priv);
+      /* call the object initializers */
+      rte_mempool_obj_iter (rmp, rte_pktmbuf_init, 0);
+
+      kni_mempool_private_t *privp = rte_mempool_get_priv (rmp);
+      privp->buffer_pool_index = vlib_buffer_add_physmem_region (vm, pri);
+
+      km->pktmbuf_pools[socket_id] = rmp;
+
+      return 0;
+    }
+
+  clib_error_report (error);
+
+  /* no usable pool for this socket, try to use pool from another one */
+  for (i = 0; i < vec_len (km->pktmbuf_pools); i++)
+    {
+      if (km->pktmbuf_pools[i])
+        {
+          DBG_KNI ("WARNING: Failed to allocate mempool for CPU socket "
+                        "%u. Threads running on socket %u will use socket %u "
+                        "mempool.", socket_id, socket_id, i);
+          km->pktmbuf_pools[socket_id] = km->pktmbuf_pools[i];
+          return 0;
+        }
+    }
+
+  return clib_error_return (0, "failed to allocate mempool on socket %u",
+                            socket_id);
 }
 
 /**
@@ -221,23 +355,41 @@ int kni_enable (vlib_main_t * vm,
         clib_error_t * error = 0;
         u32 i =0;
         struct rte_kni_conf conf;
-        dpdk_main_t * dm = &dpdk_main;
         kni_interface_t *ki = NULL;
 	struct rte_kni_ops ops;
 	vnet_sw_interface_t *sw;
         vnet_hw_interface_t *hi;
+	u8 base_worker_index = 1;
+	vnet_device_main_t *vdm = &vnet_device_main;
+
+	error = kni_buffer_pool_create (vm, NB_MBUF_KNI, rte_socket_id ());
+	DBG_KNI("\n Entered error [%d] \n",error);
+	if (error)
+		return error;
+
+	for (i = 0; i < RTE_MAX_LCORE; i++)
+	{
+		error = kni_buffer_pool_create (vm,  NB_MBUF_KNI,
+				rte_lcore_to_socket_id (i));
+		DBG_KNI("\n Entered error [%d] lcore_val [%d] \n",error,i);
+		if (error)
+			return error;
+	}
 
         km->num_kni_interfaces = 0;
-        pool_foreach (hi, dm->vnet_main->interface_main.hw_interfaces, ({
-	if(0 == hi->hw_if_index)
-		clib_warning("Ignoring Loopback for KNI interface");
+	/*Loop through hardware interfaces*/
+        pool_foreach (hi, km->vnet_main->interface_main.hw_interfaces, ({
+	if(0 == hi->hw_if_index){
+		DBG_KNI("Ignoring Loopback for KNI interface");
+	}
 	else {
 	vec_add2 (km->kni_interfaces, ki, 1);
 	ki->sw_if_index = ki - km->kni_interfaces ;
-	sw = vnet_get_hw_sw_interface (dm->vnet_main, hi->hw_if_index); 
+	sw = vnet_get_hw_sw_interface (km->vnet_main, hi->hw_if_index); 
 	ki->eth_sw_if_index  = sw->sw_if_index; 
 	ki->eth_hw_if_index = hi->hw_if_index;
-	clib_warning ("hw_if_index %d sw_if_index %d Mac [%02x:%02x:%02x:%02x:%02x:%02x]",
+	memcpy (ki->mac_addr, hi->hw_address, ETHER_ADDR_LEN);
+	DBG_KNI ("hw_if_index %d sw_if_index %d Mac [%02x:%02x:%02x:%02x:%02x:%02x]",
 										hi->hw_if_index,
 										hi->sw_if_index,
 										hi->hw_address[0],
@@ -261,7 +413,7 @@ int kni_enable (vlib_main_t * vm,
                 memset(&ops, 0, sizeof(ops));
                 ops.port_id = i;
                 ops.change_mtu = kni_change_mtu;
-                clib_warning ("Registering ops.config_network_if");
+                DBG_KNI ("Registering ops.config_network_if");
                 //ops.config_network_if = kni_config_network_interface;
                 ops.config_network_if = kni_trigered_interface_admin_up_down;
 
@@ -272,32 +424,31 @@ int kni_enable (vlib_main_t * vm,
                 conf.force_bind = 1;
                 conf.group_id = i;
                 conf.mbuf_size = 2048;
-                ki->kni = rte_kni_alloc(dm->pktmbuf_pools[0], &conf,  &ops);
-                u8 hw_addr[6];
-                {/*Generating dummy Mac Address*/
-                        f64 now = vlib_time_now (vm);
-                        u32 rnd;
-                        rnd = (u32) (now * 1e6);
-                        rnd = random_u32 (&rnd);
-                        memcpy (hw_addr + 2, &rnd, sizeof (rnd));
-                        hw_addr[0] = 2;
-                        hw_addr[1] = 0xfe;
-                }
+		memcpy (conf.mac_addr, ki->mac_addr, ETHER_ADDR_LEN);
+                ki->kni = rte_kni_alloc(km->pktmbuf_pools[0], &conf,  &ops);
+
                 error = ethernet_register_interface
                         (km->vnet_main,
                          kni_dev_class.index,
                          ki - km->kni_interfaces /* device instance */,
-                         hw_addr /* ethernet address */,
+                         ki->mac_addr /* ethernet address */,
                          &ki->hw_if_index, kni_flag_change);
-                clib_warning ("Called ethernet_register_interface ,ret [%d] got hw_if_index [%d] ",
+                DBG_KNI ("Called ethernet_register_interface ,ret [%d] got hw_if_index [%d] ",
                                 error,
                                 ki->hw_if_index);
+	vnet_hw_interface_set_input_node (km->vnet_main, ki->hw_if_index,
+                                         kni_input_node.index);
 	hash_set(km->kni_interface_index_by_eth_index, ki->eth_hw_if_index,ki->hw_if_index);
 	hash_set(km->kni_interface_index_by_sw_if_index,ki->hw_if_index,i);
-        clib_warning ("ki_hw_if_index %d ki_sw_if_index %d dpdk_hw_if_index [%d] dpdk_sw_if_index[%d]",ki->hw_if_index,
+	vnet_hw_interface_assign_rx_thread (km->vnet_main, ki->hw_if_index, 0,
+                                            	 vdm->first_worker_thread_index + i);
+        DBG_KNI ("Worker Id [%d] ki_hw_if_index %d ki_sw_if_index %d dpdk_hw_if_index [%d] dpdk_sw_if_index[%d]",
+												(vdm->first_worker_thread_index + i) ,
+												ki->hw_if_index,
 												ki->sw_if_index,
 												ki->eth_hw_if_index ,
                                         							ki->eth_sw_if_index);
+
   	vnet_feature_enable_disable ("device-input", "slowpath",
                                ki->eth_sw_if_index, enable_disable, 0, 0);
 
@@ -317,7 +468,7 @@ kni_enable_disable_command_fn (vlib_main_t * vm,
   int rv;
   int enable_disable = 1;
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT) {
-	clib_warning("Input : %s", input);
+	DBG_KNI("Input : %s", input);
   }
 
   if(!km->is_disabled)

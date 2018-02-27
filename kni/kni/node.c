@@ -121,8 +121,6 @@ kni_input_iface(vlib_main_t * vm,
 	unsigned num;
 	u32 mb_index;
 	uword n_rx_bytes = 0;
-        rte_kni_handle_request(ki->kni);
-
 	//  const uword buffer_size = vlib_buffer_free_list_buffer_size ( vm,
 	//                                VLIB_BUFFER_DEFAULT_FREE_LIST_INDEX);
 	/*  u32 n_trace = vlib_get_trace_count (vm, node);
@@ -135,9 +133,15 @@ kni_input_iface(vlib_main_t * vm,
 	u32 next_index =  KNI_RX_NEXT_INTERFACE_OUTPUT;
 	u32 n_left_to_next, *to_next;
 	vlib_buffer_free_list_t *fl;
-	 //clib_warning ("Entering kni_input_iface");
+	//DBG_KNI ("Entering kni_input_iface");
 	vnm = vnet_get_main();
+/* //Moving it to the parent function
+	if(vlib_get_thread_index () == 0)
+	{
+		rte_kni_handle_request(ki->kni);
+	}
 
+*/
 	n_buffers = kni_input_burst(ki);
 
 	if (n_buffers == 0)
@@ -165,8 +169,8 @@ kni_input_iface(vlib_main_t * vm,
 			ASSERT (mb0);
 
 			b0 = kni_vlib_buffer_from_rte_mbuf (mb0);
-			clib_warning("RX hw_if_index[VLIB_RX] [%d] Tx hw_if_index[VLIB_TX] [%d]",ki->hw_if_index,
-								ki->eth_hw_if_index);
+			DBG_KNI("RX hw_if_index[VLIB_RX] [%d] Tx hw_if_index[VLIB_TX] [%d]",ki->hw_if_index,
+					ki->eth_hw_if_index);
 			vnet_buffer (b0)->sw_if_index[VLIB_RX] = ki->hw_if_index;
 			vnet_buffer (b0)->sw_if_index[VLIB_TX] = ki->eth_hw_if_index;
 			//b0->buffer_pool_index =;/*TODO*/
@@ -188,8 +192,8 @@ kni_input_iface(vlib_main_t * vm,
 			VLIB_BUFFER_TRACE_TRAJECTORY_INIT (b0);
 
 			/* Do we have any driver RX features configured on the interface? */
-//			vnet_feature_start_device_input_x1 (xd->vlib_sw_if_index, &next0,
-//			                                     b0);
+			//			vnet_feature_start_device_input_x1 (xd->vlib_sw_if_index, &next0,
+			//			                                     b0);
 
 			vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
 					to_next, n_left_to_next,
@@ -211,7 +215,32 @@ kni_input (vlib_main_t * vm,
 {
   kni_main_t * km = &kni_main;
   kni_interface_t * ki;
-  int i;
+  u32 total_count = 0;
+  vnet_device_input_runtime_t *rt = (void *) node->runtime_data;
+  vnet_device_and_queue_t *dq;
+  u32 thread_index = node->thread_index;
+
+
+  foreach_device_and_queue (dq, rt->devices_and_queues)
+    {
+    //  clib_warning("dq->dev_instance [%d]", dq->dev_instance);
+      ki = vec_elt_at_index(km->kni_interfaces, dq->dev_instance);
+      total_count += kni_input_iface(vm, node, ki);
+    }
+    if(0 == thread_index)
+     {
+       u8 i = 0;
+       for (i = 0; i < vec_len(km->kni_interfaces); i++)
+          {
+             ki = vec_elt_at_index (km->kni_interfaces, i);
+	     rte_kni_handle_request(ki->kni);
+          }
+     }
+
+  return total_count; //This might return more than 256.
+
+
+/*  int i;
   u32 total_count = 0;
 
   for (i = 0; i < vec_len(km->kni_interfaces); i++)
@@ -221,7 +250,7 @@ kni_input (vlib_main_t * vm,
       total_count += kni_input_iface(vm, node, ki);
     }
   return total_count; //This might return more than 256.
-
+*/
 /*  static u32 * ready_interface_indices;
 
   vec_reset_length (ready_interface_indices);

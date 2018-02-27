@@ -93,7 +93,7 @@ kni_tx_iface(vlib_main_t * vm,
   vnet_sw_interface_t *si = vnet_get_sw_interface (vnet_get_main(), ki->sw_if_index);
   if (PREDICT_FALSE(!(si->flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP))) {
     //Drop if interface is down
-    clib_warning ("sw_if_index %d", __LINE__);
+    DBG_KNI ("sw_if_index %d", __LINE__);
     vlib_buffer_free(vm, vlib_frame_vector_args(frame), frame->n_vectors);
     return 0;
   }
@@ -103,15 +103,15 @@ kni_tx_iface(vlib_main_t * vm,
     struct iovec * iov;
     b = vlib_get_buffer(vm, buffers[i]);
 
-    clib_warning ("sw_if_index %d", __LINE__);
+    DBG_KNI ("sw_if_index %d", __LINE__);
     mb = kni_rte_mbuf_from_vlib_buffer (b);
     ki->tx_vector[i] = mb;
   }
-    clib_warning ("sw_if_index %d", __LINE__);
+    DBG_KNI ("sw_if_index %d", __LINE__);
     n_successful_tx = rte_kni_tx_burst(ki->kni,ki->tx_vector,n_tx);
        if(n_successful_tx < n_tx)
         {
-           clib_warning ("Only able to TX [%d] out of [%d] ",n_successful_tx, n_tx);
+           DBG_KNI ("Only able to TX [%d] out of [%d] ",n_successful_tx, n_tx);
         }
 /*
   if (n_tx) {
@@ -161,12 +161,12 @@ kni_tx (vlib_main_t * vm,
 
     ki_index = hash_get(km->kni_interface_index_by_sw_if_index,tx_sw_if_index);
     ki = vec_elt_at_index (km->kni_interfaces, *ki_index);
-     clib_warning("check index tx_sw_if_index[%d] *ki_index[%d] ", tx_sw_if_index,
+     DBG_KNI("check index tx_sw_if_index[%d] *ki_index[%d] ", tx_sw_if_index,
 							*ki_index);
    if(ki)
      return kni_tx_iface(vm, node, frame, ki);
    else{
-     clib_warning("Error index [%d] ", tx_sw_if_index);
+     DBG_KNI("Error index [%d] ", tx_sw_if_index);
      return 0;
        }
 }
@@ -181,7 +181,7 @@ VLIB_REGISTER_NODE (kni_tx_node,static) = {
 static clib_error_t *
 kni_interface_add_del_function(vnet_main_t * vnm, u32 hw_if_index, u32 flags)
 {
-	clib_warning ("Calling kni_interface_add_del_function hw_if_index[%d] ",hw_if_index);
+	DBG_KNI ("Calling kni_interface_add_del_function hw_if_index[%d] ",hw_if_index);
 	return 0;
 
 }
@@ -192,7 +192,7 @@ kni_interface_add_del_function(vnet_main_t * vnm, u32 hw_if_index, u32 flags)
 static clib_error_t *
 kni_interface_admin_up_down (vnet_main_t * vnm, u32 hw_if_index, u32 flags)
 {
-  clib_warning ("Calling kni_admin_up_down_function hw_if_index[%d] ",hw_if_index);
+  DBG_KNI ("Calling kni_admin_up_down_function hw_if_index[%d] ",hw_if_index);
   uword is_admin_up = (flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP) != 0;
   u32 hw_flags;
   u32 speed_duplex = VNET_HW_INTERFACE_FLAG_FULL_DUPLEX
